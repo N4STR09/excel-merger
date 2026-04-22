@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.4.0] — Sesión D: nuevas funcionalidades
+
+### Añadido
+
+- **`--dry-run`** (`Main`, `ExcelMerger`): nueva flag de CLI que ejecuta el pipeline completo (validación de config, detección de perfiles, construcción de hojas Resultado/Equipos/derivadas en memoria, detección de apps sin mapeo, cabeceras no encontradas, etc.) pero **NO escribe el Excel de salida y NO mueve el anterior a `history/`**. Útil para validar la configuración antes de un cierre mensual. El chequeo de lock `~$` sobre el output sí se mantiene para avisar cuanto antes. Nuevo constructor sobrecargado `ExcelMerger(ConfigLoader, RunReport, boolean dryRun)`; el constructor de 2 args delega con `dryRun=false` (retrocompatible, los 125 tests existentes siguen verdes sin tocar).
+- **Hoja `_Avisos` en el Excel resultado** (clase nueva `AvisosSheetBuilder`): opt-in con `report.inExcel=true`. Vuelca todos los warnings acumulados en el `RunReport` (apps sin mapeo, cabeceras no encontradas, perfiles sin match, etc.) a una hoja extra del Excel, con cabecera `Categoria | Mensaje`. Oculta por defecto. La hoja no se crea si no hay warnings (evita hojas vacías ruidosas) ni si `report.inExcel=false`. Colisión con hoja existente: se omite y se registra un warning `HOJA`. Se construye igual en dry-run (en memoria), aunque luego no se escriba a disco.
+- **Configs por entorno** (`run.bat`): el lanzador acepta un alias opcional como primer argumento y lo resuelve a `config-<alias>.properties`. Por ejemplo, `run.bat contabilidad` carga `config-contabilidad.properties`. Si el argumento ya termina en `.properties` (case-insensitive), se pasa tal cual al JAR. Si el fichero resuelto no existe en la carpeta del `.bat`, el lanzador aborta con `exit /b 2` y mensaje claro **antes** de arrancar la JVM. Sin argumento: comportamiento actual (el JAR usa `config.properties` por defecto).
+
+### Configuración nueva
+
+Solo se añaden claves nuevas; la sintaxis del `config.properties` y las claves existentes no cambian:
+
+- `report.inExcel=false` (default; opt-in explícito).
+- `report.sheetName=_Avisos` (nombre de la hoja de avisos).
+- `report.hidden=true` (la hoja se crea oculta).
+
+### Tests
+
+- `ExcelMergerIntegrationTest` (+7): 5 de `--dry-run` (no crea fichero, no mueve a history, detecta apps sin mapeo igualmente, falla si output lockeado, backward-compat del constructor de 2 args) y 2 de `_Avisos` (aparece con `inExcel=true` y contiene la app `ZZ`, no aparece con el default `false`).
+- `AvisosSheetBuilderTest` (+8, clase nueva): no-op si `inExcel=false`, no-op si no hay warnings, volcado ordenado con cabecera `Categoria|Mensaje`, oculta por defecto, visible con `hidden=false`, nombre personalizable vía `report.sheetName`, colisión con hoja existente + warning `HOJA`, registro en `RunReport.sheets()`.
+- `ConfigLoaderTest` (+2): carga `config-<env>.properties` por ruta externa; `ConfigurationException` si el fichero no existe. Blindan el contrato que usa `run.bat`.
+- Total: 125 → **142 tests** (+17). Cobertura ≥70% mantenida.
+
+### Sin cambios
+
+- Exit codes del JAR (0-4).
+- Case-sensitive de `{col:X}` en `MesSheetBuilder` (decisión heredada de [1.2.1], sin modificar).
+- Sintaxis del `config.properties` (solo claves añadidas).
+- CLI del JAR: no se añaden flags nuevas más allá de `--dry-run`. La resolución de entornos vive en `run.bat`, el JAR sigue recibiendo una ruta `.properties` como siempre.
+
+### `.gitignore`
+
+- Añadidos patrones `input/*.xlsx`, `input/*.xls`, `output/**/*.xlsx`, `output/**/*.xls` para evitar subir al repositorio Excel con datos reales (peticiones, horas, matrículas...). Los fixtures sintéticos de `src/test/resources/fixtures/` siguen versionándose (necesarios para los tests).
+
 ## [1.3.1] — Rename MES → Resultado y condición Funcion en SUMIFS
 
 ### Cambiado

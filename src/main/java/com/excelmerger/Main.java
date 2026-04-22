@@ -40,7 +40,7 @@ public final class Main {
 
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final String APP_NAME = "Excel Merger";
-    private static final String APP_VERSION = "1.3.1";
+    private static final String APP_VERSION = "1.4.0";
 
     // Exit codes (mantenidos compatibles con versiones anteriores: 0, 1, 2)
     static final int EXIT_OK               = 0;

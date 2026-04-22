@@ -48,7 +48,7 @@ excel-merger/
 mvn clean package
 ```
 
-Genera `target/excel-merger-1.2.0-jar-with-dependencies.jar`.
+Genera `target/excel-merger-1.4.0-jar-with-dependencies.jar`.
 
 ## Tests
 
@@ -68,9 +68,20 @@ El reporte HTML de cobertura queda en `target/site/jacoco/index.html`. Si el gat
 
 ### Organización
 
-- **8 clases en `src/test/java/com/excelmerger/`**, 123 tests: `ConfigLoaderTest`, `ConfigValidatorTest`, `RunReportTest`, `FileProfileResolverTest`, `LookupSheetBuilderTest`, `MesSheetBuilderTest`, `DerivedSheetBuilderTest`, `ExcelMergerIntegrationTest`.
+- **9 clases en `src/test/java/com/excelmerger/`**, 142 tests: `ConfigLoaderTest`, `ConfigValidatorTest`, `RunReportTest`, `FileProfileResolverTest`, `LookupSheetBuilderTest`, `MesSheetBuilderTest`, `DerivedSheetBuilderTest`, `AvisosSheetBuilderTest`, `ExcelMergerIntegrationTest`.
 - **`TestFixtures.java`** es la utilidad compartida: copia los fixtures a un `@TempDir`, renderiza `test-config.properties` sustituyendo `${TEST_INPUT_DIR}` / `${TEST_OUTPUT_FILE}`, y ofrece `configFromProperties(...)` para tests unitarios que no tocan disco.
 - Todos los tests usan `@TempDir`; no hay efectos colaterales fuera del directorio temporal de cada caso.
+
+### Pruebas manuales del `run.bat` (v1.4.0)
+
+La lógica de resolución de alias de entorno vive en batch, fuera de la red de seguridad JUnit. Para validarla en Windows, tres casos rápidos desde `cmd` en la carpeta del proyecto:
+
+| Caso                           | Comando                         | Resultado esperado                                                                 |
+| ------------------------------ | ------------------------------- | ---------------------------------------------------------------------------------- |
+| Sin argumento                  | `run.bat`                       | El JAR arranca con `config.properties`. Log: `Ejecutando: ...jar`.                 |
+| Alias con fichero existente    | `run.bat contabilidad`          | Si existe `config-contabilidad.properties`, el JAR arranca con él. Log: `Ejecutando: ...jar con config 'config-contabilidad.properties'`. |
+| Alias con fichero inexistente  | `run.bat pre`                   | Sin `config-pre.properties`: el `.bat` imprime `[ERROR] No se encuentra el fichero de configuracion: config-pre.properties` y sale con `exit /b 2` sin arrancar Java. |
+| Ruta `.properties` explícita   | `run.bat otra-carpeta\x.properties` | Se pasa tal cual al JAR (misma regla: case-insensitive sobre el sufijo). |
 
 ### Fixtures
 
@@ -88,25 +99,48 @@ python3 gen_fixtures.py
 
 ### Cobertura
 
-El `pom.xml` configura JaCoCo 0.8.12 con umbral **70% INSTRUCTION a nivel de bundle**, excluyendo únicamente `com/excelmerger/Main.class` (contiene `System.exit()` y lógica de CLI que requeriría un runner externo para cubrirse). Si en alguna iteración el umbral falla en una clase concreta por ramas difíciles (p. ej. la heurística `looksLikeLocked` de `ExcelMerger` en Linux), la recomendación es **añadir exclusiones granulares** en el bloque de JaCoCo, no bajar el umbral global.
+El `pom.xml` configura JaCoCo 0.8.14 con umbral **70% INSTRUCTION a nivel de bundle**, excluyendo únicamente `com/excelmerger/Main.class` (contiene `System.exit()` y lógica de CLI que requeriría un runner externo para cubrirse). Si en alguna iteración el umbral falla en una clase concreta por ramas difíciles (p. ej. la heurística `looksLikeLocked` de `ExcelMerger` en Linux), la recomendación es **añadir exclusiones granulares** en el bloque de JaCoCo, no bajar el umbral global.
 
 ## Ejecución
 
 ### Windows (recomendado)
 
-Doble clic en `run.bat`.
+Doble clic en `run.bat`. Desde una terminal de Windows también puedes pasarle un **alias de entorno** como primer argumento:
+
+```bat
+run.bat                     :: usa config.properties (default)
+run.bat contabilidad        :: usa config-contabilidad.properties
+run.bat mi-cfg.properties   :: pasa esta ruta tal cual al JAR
+```
+
+La regla que aplica el `.bat`:
+- Sin argumento → arranca el JAR sin pasar ningún config (el JAR usará `config.properties` del directorio actual).
+- Argumento que termina en `.properties` → se pasa tal cual.
+- Cualquier otro argumento → se resuelve a `config-<arg>.properties` en la carpeta del `.bat`.
+
+Si el fichero resuelto no existe, el lanzador aborta con **exit code 2** y muestra la ruta buscada, **antes** de arrancar la JVM.
 
 ### Línea de comandos
 
 ```bash
-java -jar target/excel-merger-1.2.0-jar-with-dependencies.jar
+java -jar target/excel-merger-1.4.0-jar-with-dependencies.jar
 ```
 
 Opcionalmente se puede pasar un config alternativo:
 
 ```bash
-java -jar target/excel-merger-1.2.0-jar-with-dependencies.jar mi-config.properties
+java -jar target/excel-merger-1.4.0-jar-with-dependencies.jar mi-config.properties
 ```
+
+### Dry-run (v1.4.0)
+
+Ejecuta el pipeline completo (validación, detección de perfiles, apps sin mapeo, cabeceras, etc.) pero **no escribe el Excel de salida y no mueve el anterior a `history/`**. Útil antes de un cierre mensual para validar la configuración sin tocar el output real:
+
+```bash
+java -jar target/excel-merger-1.4.0-jar-with-dependencies.jar --dry-run
+```
+
+En el log final verás `PROCESO FINALIZADO OK (DRY-RUN, N ms)`. Los warnings (apps sin mapeo, perfiles sin match...) aparecen igualmente en el resumen. Los chequeos de lock `~$` sobre el output sí se mantienen: si el fichero está abierto en Excel, te lo dice ya.
 
 ## Flujo del programa
 
@@ -244,6 +278,25 @@ config.strictValidation=true
 ```
 
 Si se pone a `false`, los errores se degradan a warnings (aparecen en el resumen final) y la ejecución continúa como en versiones anteriores.
+
+### Hoja de avisos en el Excel (v1.4.0)
+
+Todos los warnings acumulados durante la ejecución (apps sin mapeo, cabeceras no encontradas, perfiles sin match, entradas de lookup malformadas...) se pueden volcar a una hoja extra del Excel resultado para revisarlos sin abrir el log. Es **opt-in**:
+
+```properties
+# Si true, añade una hoja '_Avisos' al Excel resultado con los warnings.
+# Si no hay warnings, la hoja no se crea.
+report.inExcel=false
+
+# Nombre de la hoja (default: _Avisos)
+report.sheetName=_Avisos
+
+# Si true (default), la hoja se crea oculta.
+# Se ve en Excel con clic derecho sobre una pestaña > Mostrar...
+report.hidden=true
+```
+
+La hoja tiene dos columnas (`Categoria` y `Mensaje`) y un warning por fila, en el orden en que se produjeron. Las categorías habituales son `PERFIL`, `CABECERA`, `FORMULA`, `LOOKUP`, `HOJA` y `CONFIG`. En modo `--dry-run` la hoja también se construye (en memoria), aunque no se escriba a disco.
 
 ### Códigos de salida
 
