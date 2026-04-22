@@ -1,0 +1,13 @@
+# Finales de linea normalizados
+* text=auto eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binarios
+*.xlsx binary
+*.xls binary
+*.jar binary
+*.png binary
+*.ico binary

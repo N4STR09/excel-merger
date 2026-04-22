@@ -1,0 +1,36 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Excel temporales
+~$*.xlsx
+
+# Datos sensibles del usuario (no subir al repositorio)
+# Los Excel reales de input/ y output/ pueden contener info confidencial
+# (peticiones, horas imputadas, matriculas, etc.). Los fixtures de test
+# en src/test/resources/fixtures/ SI se versionan: estan construidos con
+# datos sinteticos y son necesarios para la red de seguridad de tests.
+input/*.xlsx
+input/*.xls
+output/**/*.xlsx
+output/**/*.xls
