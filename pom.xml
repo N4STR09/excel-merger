@@ -25,7 +25,8 @@
         <git-commit-id.version>9.2.0</git-commit-id.version>
         <spotbugs-maven-plugin.version>4.9.8.2</spotbugs-maven-plugin.version>
         <spotbugs.version>4.9.8</spotbugs.version>
-        <maven-pmd-plugin.version>3.26.0</maven-pmd-plugin.version>
+        <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version>
+        <pmd.version>7.18.0</pmd.version>
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
         <checkstyle.version>10.21.4</checkstyle.version>
     </properties>
@@ -289,12 +290,27 @@
                  Ruleset propio que traduce los rulesets clásicos
                  (java-basic / java-design / java-unusedcode) a las
                  categorías modernas de PMD 7 con exclusiones anti-ruido.
-                 Tests excluidos vía includeTests=false. -->
+                 Tests excluidos vía includeTests=false.
+                 Override de pmd-core/pmd-java a 7.18.0 (añade soporte Java 25;
+                 el default del plugin 3.28.0 es 7.17.0, que también basta). -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
                 <version>${maven-pmd-plugin.version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-core</artifactId>
+                        <version>${pmd.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-java</artifactId>
+                        <version>${pmd.version}</version>
+                    </dependency>
+                </dependencies>
                 <configuration>
+                    <targetJdk>25</targetJdk>
                     <printFailingErrors>true</printFailingErrors>
                     <failOnViolation>true</failOnViolation>
                     <includeTests>false</includeTests>
