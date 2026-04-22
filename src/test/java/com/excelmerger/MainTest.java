@@ -54,8 +54,9 @@ class MainTest {
 
     @Test
     void appVersionEsLaEsperadaPorLaSesionE() {
-        // Este test fija la expectativa de versión al bump acordado en la Sesión E.
+        // Este test fija la expectativa de versión al bump acordado.
         // Si se sube la versión, este test debe actualizarse conscientemente.
-        assertThat(Main.APP_VERSION).isEqualTo("1.5.0");
+        // 1.5.1: patch de la Sesión E2 (segunda pasada de calidad).
+        assertThat(Main.APP_VERSION).isEqualTo("1.5.1");
     }
 }

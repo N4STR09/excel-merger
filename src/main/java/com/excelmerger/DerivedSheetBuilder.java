@@ -176,7 +176,6 @@ public class DerivedSheetBuilder {
                     "'" + prefix + "sourceSheet' requerido para AGGREGATION '" + id + "'. Omitida.");
             return false;
         }
-        int headerRow = config.getInt(prefix + "headerRow", 1);        // 1-indexado
         int firstDataRow = config.getInt(prefix + "firstDataRow", 2);  // 1-indexado
         String groupColRaw = config.get(prefix + "groupByColumn", null);
         String valueColRaw = config.get(prefix + "valueColumn", null);

@@ -99,12 +99,12 @@ public final class PoiUtils {
      */
     public static int findColumnIndex(Row headerRow, String headerText) {
         if (headerRow == null || headerText == null) return -1;
-        String target = headerText.trim().toLowerCase();
+        String target = headerText.trim();
         for (int c = 0; c < headerRow.getLastCellNum(); c++) {
             Cell cell = headerRow.getCell(c);
             if (cell == null) continue;
             String value = cellAsString(cell);
-            if (value != null && value.trim().toLowerCase().equals(target)) {
+            if (value != null && value.trim().equalsIgnoreCase(target)) {
                 return c;
             }
         }

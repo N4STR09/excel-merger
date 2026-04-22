@@ -108,6 +108,7 @@ public final class OutputManager {
             try {
                 Files.move(out, target, StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException e) {
+                e.addSuppressed(atomicFailed);
                 throw new OutputException("No se pudo mover el output a history: "
                         + e.getMessage(), e);
             }

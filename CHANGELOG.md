@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.5.1] — Sesión E2: segunda pasada de calidad
+
+Patch sobre 1.5.0 que cierra los 6 code smells reales que la Sesión E había dejado anotados en `pmd-ruleset.xml` y baja el umbral de SpotBugs de `High` a `Medium`. **Sin cambios en comportamiento runtime ni en la API pública**. Los 146 tests siguen verdes (`MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado al nuevo literal `1.5.1`). Cobertura JaCoCo sigue en ≥ 70% INSTRUCTION.
+
+### Corregido
+
+Los 6 code smells quedan resueltos en código; las 6 exclusiones correspondientes desaparecen de `pmd-ruleset.xml`.
+
+- **`UnnecessaryCaseChange` en `PoiUtils.findColumnIndex`** — `cabecera.toUpperCase().equals(needle.toUpperCase())` reemplazado por `value.trim().equalsIgnoreCase(headerText.trim())`. Semántica idéntica para cabeceras ASCII del dominio (`CODIGO`, `CUENTA`, etc.). Se elimina también el `target` local que dejó de ser necesario.
+- **`UnusedLocalVariable` en `DerivedSheetBuilder.buildAggregationSheet`** — `int headerRow = config.getInt(prefix + "headerRow", 1);` eliminado. La variable se asignaba y nunca se leía; `firstDataRow` (que sí se usa) permanece.
+- **`UnusedAssignment` en `Main.main`** — `int exitCode = EXIT_OK;` cambiado a `int exitCode;`. Cada rama de salida (happy path línea 129; los 5 `catch`) reasigna antes del `System.exit(exitCode)` final, por lo que definite assignment sigue satisfecho. El inicializador era puro ruido defensivo.
+- **`ClassWithOnlyPrivateConstructorsShouldBeFinal` en `FileProfileResolver.FileProfile`** — clase anidada marcada `public static final class FileProfile`. Verificado con grep que ningún test la extiende; el único constructor es privado y la factoría estática `fromConfig` devuelve instancias.
+- **`PreserveStackTrace` en `OutputManager.backupOutput`** — en el catch anidado `IOException atomicFailed → try REPLACE_EXISTING → catch IOException e`, la excepción original del intento atómico se descartaba si el fallback también fallaba. Fix: `e.addSuppressed(atomicFailed);` antes del `throw`. Conserva ambas trazas sin alterar el tipo ni el mensaje de la excepción pública; el constructor `OutputException(String, Throwable)` ya existía.
+- **`AvoidRethrowingException` en `ExcelMerger.merge`** — eliminado el `catch (ExcelMergerException e) { throw e; }` redundante del try-with-resources. `ExcelMergerException extends RuntimeException`, así que la excepción se propaga igual sin el catch explícito y sin necesidad de cambiar la firma del método. El `catch (IOException e) → throw new MergeException(..., e)` que le seguía se mantiene intacto.
+
+### Mantenimiento
+
+- **`pmd-ruleset.xml`**: retiradas las 6 exclusiones con sus comentarios "Anotado". El ruleset queda más limpio: ya no convive "regla activa" con "excepción anotada para sesión futura" para estas seis reglas.
+- **SpotBugs**: umbral bajado de `High` a `Medium` en `pom.xml` (`<threshold>Medium</threshold>`). El comentario del plugin se actualiza para reflejar el cambio.
+- **Version bump**: `pom.xml` y `Main.APP_VERSION` pasan de `1.5.0` a `1.5.1`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado en consecuencia — es el único test que tocó esta sesión.
+
+### Sin cambios
+
+- Comportamiento runtime del merge: los builders, la resolución de perfiles, la escritura del Excel y los códigos de salida son idénticos a 1.5.0.
+- API pública: las firmas de `PoiUtils.findColumnIndex`, `OutputManager.backupOutput`, `ExcelMerger.merge`, `FileProfileResolver.FileProfile.*` y `Main.*` no cambian.
+- Formato del código fuera de los sitios listados: no se ha reformateado nada más.
+
+---
+
 ## [1.5.0] — Sesión E: calidad de código
 
 Endurecimiento profesional del proyecto **sin cambiar comportamiento ni API**. Los 142 tests existentes siguen verdes y sin tocar. Cobertura JaCoCo sigue en ≥ 70% INSTRUCTION.

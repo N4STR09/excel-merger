@@ -92,7 +92,7 @@ public class FileProfileResolver {
     // ================================================================
     //  FileProfile: un perfil y su logica de deteccion
     // ================================================================
-    public static class FileProfile {
+    public static final class FileProfile {
         final String id;
         final String sheetName;
         final int sheetIndex;

@@ -66,11 +66,6 @@
         <!-- Falso positivo: Main.readGitProperties() devuelve Properties
              (no una Collection); PMD confunde tipos. -->
         <exclude name="ReturnEmptyCollectionRatherThanNull"/>
-
-        <!-- PoiUtils.findColumnIndex usa toUpperCase().equals(...) en vez
-             de equalsIgnoreCase. Code smell real; cambio de código queda
-             fuera del alcance de esta sesión. Anotado para revisión. -->
-        <exclude name="UnnecessaryCaseChange"/>
     </rule>
 
     <!-- === BEST PRACTICES ======================================== -->
@@ -90,19 +85,6 @@
              exactamente el canal correcto para las flags help y version.
              Usar SLF4J para stdout sería peor. -->
         <exclude name="SystemPrintln"/>
-
-        <!-- Main.exitCode=EXIT_OK como inicializador defensivo. Code smell
-             menor pero tocarlo es cambio de código. Anotado. -->
-        <exclude name="UnusedAssignment"/>
-
-        <!-- DerivedSheetBuilder.buildAggregationSheet tiene una variable
-             headerRow sin usar. Arreglo pendiente, no en esta sesión. -->
-        <exclude name="UnusedLocalVariable"/>
-
-        <!-- OutputManager.backupOutput pierde stack trace en un catch.
-             Code smell real; cambio de lógica de excepciones queda fuera
-             del alcance. Anotado para revisión futura. -->
-        <exclude name="PreserveStackTrace"/>
 
         <!-- DerivedSheetBuilder.buildFormula: switch exhaustivo con default.
              Estilo moderno Java 21+ permite omitir default; PMD se queja
@@ -134,18 +116,6 @@
         <exclude name="TooManyFields"/>
         <exclude name="TooManyMethods"/>
         <exclude name="UseUtilityClass"/>
-
-        <!-- === Exclusiones tras primera corrida real de PMD === -->
-
-        <!-- ExcelMerger.merge tiene un catch que re-lanza la excepción tras
-             un log. Refactor de lógica de excepciones; queda fuera del
-             alcance de esta sesión. Anotado. -->
-        <exclude name="AvoidRethrowingException"/>
-
-        <!-- FileProfileResolver.FileProfile tiene solo constructores privados
-             pero no es final. Marcarla final es cambio de código; podría
-             romper tests si alguno extiende (no revisado). Anotado. -->
-        <exclude name="ClassWithOnlyPrivateConstructorsShouldBeFinal"/>
     </rule>
 
 </ruleset>

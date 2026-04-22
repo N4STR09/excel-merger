@@ -6,7 +6,7 @@
 
     <groupId>com.excelmerger</groupId>
     <artifactId>excel-merger</artifactId>
-    <version>1.5.0</version>
+    <version>1.5.1</version>
     <packaging>jar</packaging>
 
     <name>Excel Merger</name>
@@ -254,8 +254,9 @@
             </plugin>
 
             <!-- SpotBugs: análisis estático de bytecode.
-                 Umbral High inicial (puede bajarse a Medium en segunda pasada).
-                 Falsos positivos se documentan en spotbugs-exclude.xml. -->
+                 Umbral Medium (bajado desde High en 1.5.1 tras estabilizar
+                 el ruleset de PMD). Falsos positivos se documentan en
+                 spotbugs-exclude.xml. -->
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
@@ -269,7 +270,7 @@
                 </dependencies>
                 <configuration>
                     <effort>Default</effort>
-                    <threshold>High</threshold>
+                    <threshold>Medium</threshold>
                     <failOnError>true</failOnError>
                     <includeTests>false</includeTests>
                     <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>

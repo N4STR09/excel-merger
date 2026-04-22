@@ -188,8 +188,6 @@ public class ExcelMerger {
             }
 
             log.info("Fusion completada correctamente{}.", dryRun ? " (dry-run, sin escritura)" : "");
-        } catch (com.excelmerger.exception.ExcelMergerException e) {
-            throw e;
         } catch (IOException e) {
             throw new MergeException("Fallo durante la fusion: " + e.getMessage(), e);
         }
