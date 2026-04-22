@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE module PUBLIC
+        "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+        "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+    Ruleset Checkstyle propio (Sesión E, opción B).
+
+    NO usamos google_checks.xml porque su indent=2 y CustomImportOrder
+    producen >2000 falsos positivos sobre el estilo actual (indent 4,
+    orden de imports distinto). En su lugar, este ruleset contiene solo
+    las reglas explícitamente pedidas en el brief de la Sesión E más un
+    par de invariantes obvios (tabs, wildcard imports), diseñado para
+    dar 0 violaciones de severidad ERROR sobre el código actual.
+
+    Reglas activas:
+      - FileTabCharacter         : prohíbe TAB en ficheros Java.
+      - LineLength = 140         : margen holgado para fórmulas Excel largas.
+      - AvoidStarImport          : prohíbe imports con wildcard,
+                                   con suppression específica para los dos
+                                   ficheros que sí los usan (POI).
+      - MissingJavadocMethod     : severity=info, NO failure (hay métodos
+                                   sin javadoc intencional).
+      - AbbreviationAsWordInName : activa con vocabulario del dominio Excel
+                                   permitido, y suprimida en src/test/** por
+                                   la convención de nombrar tests en castellano
+                                   con palabras en mayúsculas (VLOOKUP, HOJA...).
+-->
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+    <property name="severity" value="error"/>
+    <property name="fileExtensions" value="java, properties, xml"/>
+
+    <!-- Sin TABs en ficheros Java -->
+    <module name="FileTabCharacter">
+        <property name="eachLine" value="true"/>
+    </module>
+
+    <!-- Longitud de línea: 140 (el brief pedía subir de 100 a 140) -->
+    <module name="LineLength">
+        <property name="fileExtensions" value="java"/>
+        <property name="max" value="140"/>
+        <!-- No cuentan imports ni paquetes, como es habitual -->
+        <property name="ignorePattern" value="^(package|import) .+;$"/>
+    </module>
+
+    <!-- Supresiones por path: los dos ficheros que intencionalmente
+         usan imports con * de org.apache.poi.ss.usermodel quedan fuera
+         de AvoidStarImport. -->
+    <module name="SuppressionSingleFilter">
+        <property name="files" value="DerivedSheetBuilder\.java$"/>
+        <property name="checks" value="AvoidStarImport"/>
+    </module>
+    <module name="SuppressionSingleFilter">
+        <property name="files" value="LookupSheetBuilder\.java$"/>
+        <property name="checks" value="AvoidStarImport"/>
+    </module>
+
+    <!-- Los tests usan nombres descriptivos largos con palabras en
+         mayúsculas al final (VLOOKUP, HOJA, REAL, CABECERA, ...). Es una
+         convención del proyecto, no un olvido. Los excluimos de
+         AbbreviationAsWordInName. -->
+    <module name="SuppressionSingleFilter">
+        <property name="files" value="[\\/]src[\\/]test[\\/]java[\\/]"/>
+        <property name="checks" value="AbbreviationAsWordInName"/>
+    </module>
+
+    <module name="TreeWalker">
+        <!-- Prohibir imports con wildcard (excepto los suprimidos arriba) -->
+        <module name="AvoidStarImport"/>
+
+        <!-- Javadoc en métodos: solo warning, NO rompe build.
+             El brief lo pide como "warning, no failure". -->
+        <module name="MissingJavadocMethod">
+            <property name="severity" value="info"/>
+            <property name="scope" value="public"/>
+            <property name="allowMissingPropertyJavadoc" value="true"/>
+            <property name="ignoreMethodNamesRegex" value="^(main|toString|equals|hashCode|get[A-Z].*|set[A-Z].*|is[A-Z].*)$"/>
+        </module>
+
+        <!-- Abreviaturas en nombres, con vocabulario del dominio permitido.
+             Sin esto saltaría en muchos nombres internos que usan SUMIFS,
+             VLOOKUP, PDCL, etc. -->
+        <module name="AbbreviationAsWordInName">
+            <property name="allowedAbbreviationLength" value="2"/>
+            <property name="allowedAbbreviations" value="SUMIFS,VLOOKUP,PDCL,IO,ID,XLS,XLSX,CSV,POI,UTC,OK,UTF,BOM"/>
+            <property name="ignoreStatic" value="true"/>
+            <property name="ignoreFinal" value="true"/>
+        </module>
+    </module>
+</module>

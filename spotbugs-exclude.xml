@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    SpotBugs exclude filter (Sesion E, Fase 3).
+
+    Este fichero se carga automaticamente desde el spotbugs-maven-plugin.
+    Cuando SpotBugs reporte un falso positivo real, anadir aqui un bloque
+    Match JUSTIFICADO con un comentario (FUERA del Match, justo encima)
+    explicando por que es falso positivo. Ejemplo sintactico (sin angle
+    brackets para no romper el parser XML del comentario):
+
+        Justificacion: los Excel de POI usan UTF-8 internamente;
+        esta advertencia viene del propio POI, no de nuestro codigo.
+        Match:
+          Class name = com.excelmerger.ExcelMerger
+          Method name = merge
+          Bug pattern = DM_DEFAULT_ENCODING
+
+    Esta primera version se deja vacia: el umbral de severidad esta en
+    HIGH, lo cual suele producir 0 o muy pocos issues sobre codigo
+    funcional. Si al ejecutar mvnw verify aparecen issues en HIGH, se
+    arreglan en el codigo o se anaden aqui con su justificacion.
+-->
+<FindBugsFilter>
+</FindBugsFilter>

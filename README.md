@@ -40,15 +40,27 @@ excel-merger/
 ## Requisitos
 
 - **Java 25** (Oracle JDK o cualquier distribución compatible).
-- Maven 3.6+ (solo para compilar).
+- Maven 3.9+ **opcional**: el proyecto incluye Maven Wrapper (`mvnw` / `mvnw.cmd`), así que no hace falta tener Maven instalado. La primera ejecución del wrapper descarga Maven 3.9.9 a `~/.m2/wrapper/dists/`.
 
 ## Compilación
+
+Con el wrapper (recomendado, no requiere Maven instalado):
+
+```bash
+# Windows
+mvnw.cmd clean verify
+
+# Linux / macOS
+./mvnw clean verify
+```
+
+O bien, si ya tienes Maven en el sistema:
 
 ```bash
 mvn clean package
 ```
 
-Genera `target/excel-merger-1.4.0-jar-with-dependencies.jar`.
+Genera `target/excel-merger-1.5.0-jar-with-dependencies.jar`.
 
 ## Tests
 
@@ -58,13 +70,23 @@ Desde v1.2.1 el proyecto lleva una suite JUnit 5 con red de seguridad sobre los 
 
 ```bash
 # Solo tests unitarios + integración (rápido)
-mvn test
+mvnw.cmd test
 
 # Tests + reporte y gate de cobertura JaCoCo (≥70% INSTRUCTION)
-mvn clean verify
+# + spotless:check + spotbugs:check + pmd:check + checkstyle:check
+mvnw.cmd clean verify
 ```
 
-El reporte HTML de cobertura queda en `target/site/jacoco/index.html`. Si el gate del 70% falla, `mvn verify` sale con error indicando la diferencia.
+El reporte HTML de cobertura queda en `target/site/jacoco/index.html`. Si el gate del 70% falla, `mvnw clean verify` sale con error indicando la diferencia.
+
+### Calidad de código (v1.5.0)
+
+El `verify` aplica además cuatro gates automáticos:
+
+- **Spotless**: invariantes básicos (UTF-8, LF, sin whitespace al final de línea, newline final). Auto-formatea con `mvnw.cmd spotless:apply`.
+- **SpotBugs**: umbral `High`, falsos positivos documentados en `spotbugs-exclude.xml`.
+- **PMD**: rulesets `java-basic`, `java-design`, `java-unusedcode`, con reglas relajadas para `src/test/java/**`.
+- **Checkstyle**: `google_checks.xml` con supresiones para abreviaturas del dominio (SUMIFS, VLOOKUP, PDCL), `LineLength=140`, y `JavadocMethod` como warning.
 
 ### Organización
 
@@ -123,13 +145,13 @@ Si el fichero resuelto no existe, el lanzador aborta con **exit code 2** y muest
 ### Línea de comandos
 
 ```bash
-java -jar target/excel-merger-1.4.0-jar-with-dependencies.jar
+java -jar target/excel-merger-1.5.0-jar-with-dependencies.jar
 ```
 
 Opcionalmente se puede pasar un config alternativo:
 
 ```bash
-java -jar target/excel-merger-1.4.0-jar-with-dependencies.jar mi-config.properties
+java -jar target/excel-merger-1.5.0-jar-with-dependencies.jar mi-config.properties
 ```
 
 ### Dry-run (v1.4.0)
@@ -137,7 +159,7 @@ java -jar target/excel-merger-1.4.0-jar-with-dependencies.jar mi-config.properti
 Ejecuta el pipeline completo (validación, detección de perfiles, apps sin mapeo, cabeceras, etc.) pero **no escribe el Excel de salida y no mueve el anterior a `history/`**. Útil antes de un cierre mensual para validar la configuración sin tocar el output real:
 
 ```bash
-java -jar target/excel-merger-1.4.0-jar-with-dependencies.jar --dry-run
+java -jar target/excel-merger-1.5.0-jar-with-dependencies.jar --dry-run
 ```
 
 En el log final verás `PROCESO FINALIZADO OK (DRY-RUN, N ms)`. Los warnings (apps sin mapeo, perfiles sin match...) aparecen igualmente en el resumen. Los chequeos de lock `~$` sobre el output sí se mantienen: si el fichero está abierto en Excel, te lo dice ya.

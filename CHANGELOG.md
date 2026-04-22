@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.5.0] — Sesión E: calidad de código
+
+Endurecimiento profesional del proyecto **sin cambiar comportamiento ni API**. Los 142 tests existentes siguen verdes y sin tocar. Cobertura JaCoCo sigue en ≥ 70% INSTRUCTION.
+
+### Fases completadas
+
+**Fase 1 — Maven Wrapper**
+- Añadidos `mvnw`, `mvnw.cmd` y `.mvn/wrapper/maven-wrapper.properties` (wrapper 3.3.2 en modo `only-script`, distribución Maven 3.9.9). El proyecto ya no requiere tener Maven instalado en el sistema.
+- `run.bat`: el mensaje de error cuando falta el JAR ahora sugiere `mvnw.cmd clean package` si existe el wrapper, y `mvn clean package` como fallback. Sin cambios en la lógica del lanzador.
+- `README.md`: nueva sección de compilación con el wrapper como recomendado.
+
+**Fase 2 — Spotless**
+- Añadido `spotless-maven-plugin:2.43.0`, enganchado a `verify`. Comando manual: `mvnw spotless:apply`.
+- **Decisión de configuración**: se descarta usar presets (Google Java Format, Google-AOSP, Eclipse) porque cualquiera de ellos reformatearía decenas de ficheros del proyecto (indent 2 vs 4, reorganización de imports, expansión de wildcards de POI, etc.). En su lugar se configura una lista mínima de invariantes que el código ya cumple: `trimTrailingWhitespace`, `endWithNewline`, `encoding UTF-8`, `lineEndings UNIX`. Resultado: **0 diffs** al correr `spotless:apply`. El control de indent e import order se delega a Checkstyle (Fase 3).
+
+**Fase 3 — Análisis estático (SpotBugs + PMD + Checkstyle)**
+
+Todos enganchados a `verify`; los fallos rompen la build.
+
+- **SpotBugs** (`spotbugs-maven-plugin:4.9.8.2`, core `4.9.8`): umbral `High`, `includeTests=false`, falsos positivos en `spotbugs-exclude.xml` (vacío de inicio, listo para recibir exclusiones justificadas). Dejado en `High` como pediste; bajar a `Medium` queda para una segunda pasada.
+
+- **PMD** (`maven-pmd-plugin:3.26.0`, PMD 7 por defecto) con ruleset propio `pmd-ruleset.xml`. **Nota histórica**: el brief pedía los rulesets clásicos `java-basic`, `java-design`, `java-unusedcode`, pero esos nombres fueron eliminados en PMD 6.0.0 (2017) y **no existen en PMD 7**, que es lo que soporta JDK 25. El ruleset propio los traduce a las categorías modernas equivalentes (`category/java/errorprone.xml`, `category/java/bestpractices.xml`, `category/java/design.xml`) excluyendo reglas conocidas por ser ruidosas (`GodClass`, `CyclomaticComplexity`, `NcssCount`, `TooManyMethods`, `LawOfDemeter`, etc.) que requerirían refactor y caen fuera del objetivo de no cambiar comportamiento. `src/test/java/**` queda excluido.
+
+- **Checkstyle** (`maven-checkstyle-plugin:3.6.0` con `com.puppycrawl.tools:checkstyle:10.21.4` forzado para soporte JDK moderno) con ruleset propio `checkstyle.xml`. **Decisión clave**: se descarta `google_checks.xml` estándar; una prueba controlada sobre el código actual produjo **2290 violaciones** debidas a incompatibilidad estructural (Google usa indent 2, el proyecto usa 4; distinto orden de imports). Las suppressions del brief (LineLength=140, AbbreviationAsWordInName, Javadoc como warning) solo cubrían ~73 de esas 2290. En su lugar, el ruleset propio contiene únicamente las reglas pedidas explícitamente en el brief más algunos invariantes obvios, diseñado para dar **0 violaciones ERROR** sobre el código actual:
+    - `FileTabCharacter` (sin tabs).
+    - `LineLength = 140` (margen para fórmulas Excel largas).
+    - `AvoidStarImport`, con suppression para `DerivedSheetBuilder.java` y `LookupSheetBuilder.java` (wildcards intencionales de `org.apache.poi.ss.usermodel.*`).
+    - `MissingJavadocMethod` con `severity=info` (aparece en consola pero no rompe build; el proyecto tiene métodos sin Javadoc intencional).
+    - `AbbreviationAsWordInName` con vocabulario del dominio permitido (`SUMIFS`, `VLOOKUP`, `PDCL`, `POI`, `XLSX`, `CSV`, `UTF`, `BOM`...), suprimida entera en `src/test/java/**` porque los nombres de tests siguen la convención `casoDescriptivoEnCastellanoCON_PalabraFinalEnMayusculas`.
+
+**Fase 4 — git-commit-id-maven-plugin**
+- Añadido `io.github.git-commit-id:git-commit-id-maven-plugin:9.2.0`, enganchado a `initialize` (antes del compile). Genera `target/classes/git.properties` con solo las dos claves necesarias: `git.commit.id.abbrev` y `git.commit.time` (formato `yyyy-MM-dd`, UTC).
+- `failOnNoGitDirectory=false` y `failOnUnableToExtractRepoInfo=false`: permite compilar fuera de un repo Git sin reventar; en ese caso no se genera `git.properties`.
+- `Main.java`: nuevo método `buildInfoString()` (package-private para test) que lee `/git.properties` del classpath. Formato enriquecido si hay datos: `Excel Merger v1.5.0 (build a3f9b2c, 2026-04-22)`. Formato básico si falta: `Excel Merger v1.5.0`. Usado en `--version` y en la cabecera de `--help`.
+- Nuevo test `MainTest` (4 tests): la llamada no rompe cuando falta `git.properties`, el formato siempre empieza por `Excel Merger v<APP_VERSION>`, el formato completo solo puede ser uno de los dos variantes esperados, y `APP_VERSION` es la esperada de la Sesión E.
+- Tests totales: 142 → **146** (+4).
+
+**Fase 5 — release**
+- Versión en `pom.xml` y `Main.APP_VERSION` bumpeada a `1.5.0`.
+- Este CHANGELOG.
+
+### Sin cambios
+
+- Comportamiento runtime: los 142 tests anteriores siguen verdes sin modificación.
+- API pública: las clases, constructores y signaturas existentes no cambian.
+- Exit codes del JAR (0-4).
+- Sintaxis del `config.properties`.
+- CLI del JAR: `--version` y `--help` siguen existiendo; solo se enriquece la salida cuando hay `git.properties` disponible.
+- Cobertura JaCoCo: umbral 70% INSTRUCTION mantenido. El test nuevo `MainTest` aumenta la cobertura sobre `Main` (que sigue excluida del gate de cobertura por contener `System.exit`).
+
+### Convenciones para mantenimiento
+
+- Ante un fallo de Checkstyle: añadir `SuppressionSingleFilter` con path específico en `checkstyle.xml` con comentario justificando el porqué, o ampliar `allowedAbbreviations`.
+- Ante un fallo de PMD: añadir `<exclude name="..."/>` en `pmd-ruleset.xml` dentro del bloque de categoría correspondiente, con comentario justificando.
+- Ante un fallo de SpotBugs: añadir `<Match>` con comentario de justificación FUERA del `<Match>` (el XML no permite comentarios anidados dentro del Match) en `spotbugs-exclude.xml`.
+- No bajar el umbral de SpotBugs a Medium/Low en esta sesión: pasada pendiente.
+
 ## [1.4.0] — Sesión D: nuevas funcionalidades
 
 ### Añadido

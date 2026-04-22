@@ -48,7 +48,11 @@ for %%f in ("target\excel-merger-*-jar-with-dependencies.jar") do set "JAR=%%f"
 if not defined JAR (
     echo.
     echo [ERROR] No se encuentra el JAR en la carpeta 'target'.
-    echo         Ejecuta antes: mvn clean package
+    if exist "mvnw.cmd" (
+        echo         Ejecuta antes: mvnw.cmd clean package
+    ) else (
+        echo         Ejecuta antes: mvn clean package
+    )
     echo.
     pause
     exit /b 1

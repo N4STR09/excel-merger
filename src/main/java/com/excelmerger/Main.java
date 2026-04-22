@@ -8,10 +8,13 @@ import com.excelmerger.exception.OutputException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Properties;
 
 /**
  * Punto de entrada de la aplicacion Excel Merger.
@@ -40,7 +43,8 @@ public final class Main {
 
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final String APP_NAME = "Excel Merger";
-    private static final String APP_VERSION = "1.4.0";
+    static final String APP_VERSION = "1.5.0";
+    private static final String GIT_PROPERTIES_PATH = "/git.properties";
 
     // Exit codes (mantenidos compatibles con versiones anteriores: 0, 1, 2)
     static final int EXIT_OK               = 0;
@@ -61,7 +65,7 @@ public final class Main {
             System.exit(EXIT_OK);
         }
         if (argList.contains("--version") || argList.contains("-v")) {
-            System.out.println(APP_NAME + " v" + APP_VERSION);
+            System.out.println(buildInfoString());
             System.exit(EXIT_OK);
         }
 
@@ -151,7 +155,7 @@ public final class Main {
     }
 
     private static void printHelp() {
-        System.out.println(APP_NAME + " v" + APP_VERSION);
+        System.out.println(buildInfoString());
         System.out.println();
         System.out.println("Uso: java -jar excel-merger.jar [opciones] [config.properties]");
         System.out.println();
@@ -171,5 +175,42 @@ public final class Main {
         System.out.println("      o config.strictValidation=true con errores)");
         System.out.println("  3   entrada invalida: directorio o ficheros Excel mal (InputValidationException)");
         System.out.println("  4   salida invalida: no se puede preparar o escribir el output (OutputException)");
+    }
+
+    /**
+     * Devuelve la cadena de versión mostrada por {@code --version} y en el banner de ayuda.
+     * Formato: {@code "Excel Merger v1.5.0 (build a3f9b2c, 2026-04-22)"}. Si no hay
+     * {@code git.properties} en el classpath o no contiene las claves esperadas (por ejemplo
+     * al compilar fuera de un repositorio Git), cae limpiamente a {@code "Excel Merger v1.5.0"}.
+     */
+    static String buildInfoString() {
+        Properties git = readGitProperties();
+        if (git == null) {
+            return APP_NAME + " v" + APP_VERSION;
+        }
+        String hash = git.getProperty("git.commit.id.abbrev");
+        String date = git.getProperty("git.commit.time");
+        if (hash == null || hash.isBlank() || date == null || date.isBlank()) {
+            return APP_NAME + " v" + APP_VERSION;
+        }
+        return APP_NAME + " v" + APP_VERSION + " (build " + hash + ", " + date + ")";
+    }
+
+    /**
+     * Carga {@code /git.properties} desde el classpath. Devuelve {@code null} si el recurso
+     * no existe o no se puede leer (p. ej. compilación fuera de un repo Git con
+     * {@code failOnNoGitDirectory=false}).
+     */
+    private static Properties readGitProperties() {
+        try (InputStream in = Main.class.getResourceAsStream(GIT_PROPERTIES_PATH)) {
+            if (in == null) {
+                return null;
+            }
+            Properties props = new Properties();
+            props.load(in);
+            return props;
+        } catch (IOException e) {
+            return null;
+        }
     }
 }

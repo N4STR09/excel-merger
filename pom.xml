@@ -6,7 +6,7 @@
 
     <groupId>com.excelmerger</groupId>
     <artifactId>excel-merger</artifactId>
-    <version>1.4.0</version>
+    <version>1.5.0</version>
     <packaging>jar</packaging>
 
     <name>Excel Merger</name>
@@ -21,6 +21,13 @@
         <assertj.version>3.25.3</assertj.version>
         <surefire.version>3.2.5</surefire.version>
         <jacoco.version>0.8.14</jacoco.version>
+        <spotless.version>2.43.0</spotless.version>
+        <git-commit-id.version>9.2.0</git-commit-id.version>
+        <spotbugs-maven-plugin.version>4.9.8.2</spotbugs-maven-plugin.version>
+        <spotbugs.version>4.9.8</spotbugs.version>
+        <maven-pmd-plugin.version>3.26.0</maven-pmd-plugin.version>
+        <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
+        <checkstyle.version>10.21.4</checkstyle.version>
     </properties>
 
     <dependencyManagement>
@@ -167,6 +174,175 @@
                                 </rule>
                             </rules>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- git-commit-id: genera target/classes/git.properties con hash y
+                 fecha del commit actual, que Main.java lee en la flag version.
+                 failOnNoGitDirectory=false permite compilar fuera de un repo git
+                 (en ese caso no se genera git.properties y Main cae al modo
+                 "solo versión"). -->
+            <plugin>
+                <groupId>io.github.git-commit-id</groupId>
+                <artifactId>git-commit-id-maven-plugin</artifactId>
+                <version>${git-commit-id.version}</version>
+                <executions>
+                    <execution>
+                        <id>get-the-git-infos</id>
+                        <goals>
+                            <goal>revision</goal>
+                        </goals>
+                        <phase>initialize</phase>
+                    </execution>
+                </executions>
+                <configuration>
+                    <failOnNoGitDirectory>false</failOnNoGitDirectory>
+                    <failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
+                    <generateGitPropertiesFile>true</generateGitPropertiesFile>
+                    <generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties</generateGitPropertiesFilename>
+                    <includeOnlyProperties>
+                        <includeOnlyProperty>^git.commit.id.abbrev$</includeOnlyProperty>
+                        <includeOnlyProperty>^git.commit.time$</includeOnlyProperty>
+                    </includeOnlyProperties>
+                    <dateFormat>yyyy-MM-dd</dateFormat>
+                    <dateFormatTimeZone>UTC</dateFormatTimeZone>
+                </configuration>
+            </plugin>
+
+            <!-- Spotless: formato automático, configuración conservadora.
+                 No se usa ningún preset (Google / Google-AOSP / Eclipse) porque
+                 el estilo actual del proyecto tiene particularidades intencionales
+                 (indent 4, algunos imports con wildcard en POI, líneas largas en
+                 fórmulas) que cualquier preset reformatearía. Esta config se limita
+                 a invariantes que el código ya cumple, por lo que produce 0 diffs
+                 al correr spotless:apply. El control de indent/línea queda a cargo
+                 de Checkstyle (Fase 3). -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
+                <configuration>
+                    <lineEndings>UNIX</lineEndings>
+                    <java>
+                        <includes>
+                            <include>src/main/java/**/*.java</include>
+                            <include>src/test/java/**/*.java</include>
+                        </includes>
+                        <encoding>UTF-8</encoding>
+                        <endWithNewline/>
+                        <trimTrailingWhitespace/>
+                    </java>
+                    <pom>
+                        <includes>
+                            <include>pom.xml</include>
+                        </includes>
+                        <encoding>UTF-8</encoding>
+                        <endWithNewline/>
+                        <trimTrailingWhitespace/>
+                    </pom>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>spotless-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- SpotBugs: análisis estático de bytecode.
+                 Umbral High inicial (puede bajarse a Medium en segunda pasada).
+                 Falsos positivos se documentan en spotbugs-exclude.xml. -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>${spotbugs-maven-plugin.version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs</artifactId>
+                        <version>${spotbugs.version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <effort>Default</effort>
+                    <threshold>High</threshold>
+                    <failOnError>true</failOnError>
+                    <includeTests>false</includeTests>
+                    <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
+                    <xmlOutput>true</xmlOutput>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>spotbugs-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- PMD: análisis estático de código fuente.
+                 Ruleset propio que traduce los rulesets clásicos
+                 (java-basic / java-design / java-unusedcode) a las
+                 categorías modernas de PMD 7 con exclusiones anti-ruido.
+                 Tests excluidos vía includeTests=false. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>${maven-pmd-plugin.version}</version>
+                <configuration>
+                    <printFailingErrors>true</printFailingErrors>
+                    <failOnViolation>true</failOnViolation>
+                    <includeTests>false</includeTests>
+                    <linkXRef>false</linkXRef>
+                    <rulesets>
+                        <ruleset>${project.basedir}/pmd-ruleset.xml</ruleset>
+                    </rulesets>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>pmd-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Checkstyle: ruleset propio (checkstyle.xml) diseñado para
+                 dar 0 violaciones ERROR sobre el código actual. Ver cabecera
+                 del fichero checkstyle.xml para el detalle de reglas
+                 activadas y motivo por el que NO se usa google_checks.xml. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>${maven-checkstyle-plugin.version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.puppycrawl.tools</groupId>
+                        <artifactId>checkstyle</artifactId>
+                        <version>${checkstyle.version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <configLocation>${project.basedir}/checkstyle.xml</configLocation>
+                    <consoleOutput>true</consoleOutput>
+                    <failsOnError>true</failsOnError>
+                    <violationSeverity>error</violationSeverity>
+                    <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>checkstyle-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>

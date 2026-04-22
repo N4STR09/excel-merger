@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="excel-merger-pmd"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+                             https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>
+        Ruleset PMD de Excel Merger (Sesión E, Fase 3).
+
+        NOTA HISTÓRICA: El brief original pedía los rulesets clásicos
+        "java-basic", "java-design", "java-unusedcode". Estos nombres
+        fueron eliminados en PMD 6.0.0 (2017) y reorganizados en
+        categorías. Este ruleset usa los sustitutos equivalentes:
+
+          java-basic     ->  category/java/errorprone.xml
+                              + partes de category/java/bestpractices.xml
+          java-unusedcode-> category/java/bestpractices.xml
+                              (UnusedLocalVariable, UnusedPrivateField, ...)
+          java-design    ->  category/java/design.xml
+
+        Se excluyen reglas de alto ruido conocidas que no aportan valor
+        al proyecto (restricciones sobre tamaño de clase, anidamiento,
+        etc. — apropiadas para una segunda pasada, no para esta sesión).
+
+        Para tests se aplica un subset más laxo (ver elemento exclude-pattern).
+    </description>
+
+    <!-- Tests: PMD solo analiza src/main/java. La exclusión src/test/java
+         se hace también vía maven-pmd-plugin (includeTests=false). -->
+    <exclude-pattern>.*/src/test/.*</exclude-pattern>
+
+    <!-- === ERROR PRONE =========================================== -->
+    <rule ref="category/java/errorprone.xml">
+        <!-- Conflictos con loggers SLF4J y patrones de try-with-resources
+             habituales. Se excluyen reglas que se sabe producen falsos
+             positivos en este dominio. -->
+        <exclude name="AvoidFieldNameMatchingMethodName"/>
+        <exclude name="AvoidLiteralsInIfCondition"/>
+        <exclude name="BeanMembersShouldSerialize"/>
+        <exclude name="DataflowAnomalyAnalysis"/>
+        <exclude name="NullAssignment"/>
+        <!-- POI a veces requiere catch-and-log; la regla es demasiado estricta -->
+        <exclude name="AvoidCatchingGenericException"/>
+    </rule>
+
+    <!-- === BEST PRACTICES ======================================== -->
+    <rule ref="category/java/bestpractices.xml">
+        <!-- Reglas ruidosas en código con muchos constants y logs -->
+        <exclude name="GuardLogStatement"/>
+        <exclude name="JUnitAssertionsShouldIncludeMessage"/>
+        <exclude name="JUnitTestContainsTooManyAsserts"/>
+        <exclude name="JUnitTestsShouldIncludeAssert"/>
+        <exclude name="LooseCoupling"/>
+        <!-- En tests se permite acceso a miembros no-públicos -->
+        <exclude name="AccessorMethodGeneration"/>
+    </rule>
+
+    <!-- === DESIGN (equivalente a java-design) ==================== -->
+    <rule ref="category/java/design.xml">
+        <!-- Reglas sobre métricas y tamaño desactivadas: el proyecto
+             tiene builders legítimamente largos (DerivedSheetBuilder,
+             MesSheetBuilder) y refactorizarlos no es objetivo de esta
+             fase. Se dejan para una segunda pasada. -->
+        <exclude name="AvoidCatchingGenericException"/>
+        <exclude name="AvoidThrowingRawExceptionTypes"/>
+        <exclude name="CognitiveComplexity"/>
+        <exclude name="CouplingBetweenObjects"/>
+        <exclude name="CyclomaticComplexity"/>
+        <exclude name="DataClass"/>
+        <exclude name="ExcessiveImports"/>
+        <exclude name="ExcessiveParameterList"/>
+        <exclude name="ExcessivePublicCount"/>
+        <exclude name="GodClass"/>
+        <exclude name="LawOfDemeter"/>
+        <exclude name="LoosePackageCoupling"/>
+        <exclude name="NcssCount"/>
+        <exclude name="NPathComplexity"/>
+        <exclude name="SignatureDeclareThrowsException"/>
+        <exclude name="TooManyFields"/>
+        <exclude name="TooManyMethods"/>
+        <exclude name="UseUtilityClass"/>
+    </rule>
+
+</ruleset>
