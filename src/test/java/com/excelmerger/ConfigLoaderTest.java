@@ -134,4 +134,39 @@ class ConfigLoaderTest {
 
         assertThat(loader.get("nombre")).isEqualTo("José Ñoño áéíóú");
     }
+
+    // ==================================================================
+    //  Contrato usado por run.bat para configs por entorno
+    //    run.bat contabilidad -> config-contabilidad.properties
+    //  El .bat resuelve el nombre y pasa la ruta al JAR; aqui blindamos
+    //  que ConfigLoader acepta esa ruta y lanza ConfigurationException
+    //  con mensaje claro si el fichero no existe.
+    // ==================================================================
+
+    @Test
+    void cargaConfigDeEntornoPorNombreConvencional(@TempDir Path tmp) throws IOException {
+        // Simulamos lo que run.bat genera al ejecutarse como 'run.bat contabilidad':
+        // un fichero 'config-contabilidad.properties' en la carpeta del .bat.
+        Path cfg = tmp.resolve("config-contabilidad.properties");
+        Files.writeString(cfg,
+                "input.directory=input-contabilidad\n"
+              + "output.file=output/contabilidad.xlsx\n",
+                StandardCharsets.UTF_8);
+
+        ConfigLoader loader = new ConfigLoader(cfg.toString());
+
+        // Las claves vienen del config de entorno, no del default.
+        assertThat(loader.get("input.directory")).isEqualTo("input-contabilidad");
+        assertThat(loader.get("output.file")).isEqualTo("output/contabilidad.xlsx");
+    }
+
+    @Test
+    void configDeEntornoInexistenteLanzaConfigurationException() {
+        // Si el usuario invoca 'run.bat pre' y no existe 'config-pre.properties',
+        // el .bat aborta antes de llegar aqui. Este test blinda el caso degenerado
+        // de que alguien pase la ruta directamente al JAR sin pasar por el .bat.
+        assertThatThrownBy(() -> new ConfigLoader("config-pre.properties"))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessageContaining("config-pre.properties");
+    }
 }
