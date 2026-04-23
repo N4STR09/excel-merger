@@ -444,4 +444,128 @@ class MesSheetBuilderTest {
         assertThat(report.warnings()).anyMatch(w ->
                 "CABECERA".equals(w.category) && w.message.contains("NoExiste"));
     }
+
+    // ==================================================================
+    //  v1.6.0: mes.col.N.fill y mes.col.N.redIfNotEqualTo
+    // ==================================================================
+
+    @Test
+    void columnaConFillAplicaEstiloDeFondoAlasCeldasDeDatos() throws Exception {
+        Properties p = baseMesConfig();
+        // Columna 1: ancla (COPY de Peticion, obligatoria para que el loop no corte)
+        p.setProperty("mes.col.1.name", "Petición");
+        p.setProperty("mes.col.1.type", "COPY");
+        p.setProperty("mes.col.1.from", "Peticion");
+        // Columna 2 con fill LIGHT_GREEN
+        p.setProperty("mes.col.2.name", "PDCL");
+        p.setProperty("mes.col.2.type", "FORMULA");
+        p.setProperty("mes.col.2.formula", "{colLetter:A}2*2");
+        p.setProperty("mes.col.2.fill", "LIGHT_GREEN");
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWorkbook("P-1", "P-2")) {
+            new MesSheetBuilder(cfg, report).build(wb);
+
+            Sheet mes = wb.getSheet("MES");
+            assertThat(mes).isNotNull();
+            // La celda (fila 1, col 1) debe tener un estilo con fill solido
+            org.apache.poi.ss.usermodel.CellStyle style = mes.getRow(1).getCell(1).getCellStyle();
+            assertThat(style).isNotNull();
+            assertThat(style.getFillPattern())
+                    .isEqualTo(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+            // Fila 2 tambien, mismo estilo (cacheado)
+            org.apache.poi.ss.usermodel.CellStyle style2 = mes.getRow(2).getCell(1).getCellStyle();
+            assertThat(style2.getFillPattern())
+                    .isEqualTo(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+        }
+    }
+
+    @Test
+    void fillConColorDesconocidoGeneraWarningYNoAplicaEstilo() throws Exception {
+        Properties p = baseMesConfig();
+        p.setProperty("mes.col.1.name", "Petición");
+        p.setProperty("mes.col.1.type", "COPY");
+        p.setProperty("mes.col.1.from", "Peticion");
+        p.setProperty("mes.col.2.name", "X");
+        p.setProperty("mes.col.2.type", "EMPTY");
+        p.setProperty("mes.col.2.fill", "RAINBOW");
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWorkbook("P-1")) {
+            new MesSheetBuilder(cfg, report).build(wb);
+        }
+
+        assertThat(report.warnings()).anyMatch(w ->
+                "CONFIG".equals(w.category) && w.message.contains("RAINBOW"));
+    }
+
+    @Test
+    void redIfNotEqualToAñadeFormatoCondicionalSobreLaColumna() throws Exception {
+        Properties p = baseMesConfig();
+        p.setProperty("mes.col.1.name", "Petición");
+        p.setProperty("mes.col.1.type", "COPY");
+        p.setProperty("mes.col.1.from", "Peticion");
+        // Columna 2 = PDCL, columna 3 = PDCL Deuda con redIfNotEqualTo=PDCL
+        p.setProperty("mes.col.2.name", "PDCL");
+        p.setProperty("mes.col.2.type", "FORMULA");
+        p.setProperty("mes.col.2.formula", "{colLetter:A}2");
+        p.setProperty("mes.col.3.name", "PDCL Deuda");
+        p.setProperty("mes.col.3.type", "FORMULA");
+        p.setProperty("mes.col.3.formula", "{col:PDCL}");
+        p.setProperty("mes.col.3.redIfNotEqualTo", "PDCL");
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWorkbook("P-1", "P-2", "P-3")) {
+            new MesSheetBuilder(cfg, report).build(wb);
+
+            Sheet mes = wb.getSheet("MES");
+            assertThat(mes).isNotNull();
+            org.apache.poi.ss.usermodel.SheetConditionalFormatting scf =
+                    mes.getSheetConditionalFormatting();
+            // Tras construir la hoja, debe haber al menos 1 regla CF
+            assertThat(scf.getNumConditionalFormattings()).isGreaterThanOrEqualTo(1);
+
+            // Alguna de las reglas debe tener la formula "C2<>B2"
+            boolean found = false;
+            for (int i = 0; i < scf.getNumConditionalFormattings(); i++) {
+                org.apache.poi.ss.usermodel.ConditionalFormatting cf =
+                        scf.getConditionalFormattingAt(i);
+                for (int r = 0; r < cf.getNumberOfRules(); r++) {
+                    String f = cf.getRule(r).getFormula1();
+                    if (f != null && f.contains("<>")) {
+                        found = true;
+                    }
+                }
+            }
+            assertThat(found)
+                    .as("Se esperaba una regla CF con operador '<>' en la formula")
+                    .isTrue();
+        }
+    }
+
+    @Test
+    void redIfNotEqualToApuntandoAColumnaInexistenteGeneraWarning() throws Exception {
+        Properties p = baseMesConfig();
+        p.setProperty("mes.col.1.name", "Petición");
+        p.setProperty("mes.col.1.type", "COPY");
+        p.setProperty("mes.col.1.from", "Peticion");
+        p.setProperty("mes.col.2.name", "PDCL Deuda");
+        p.setProperty("mes.col.2.type", "FORMULA");
+        p.setProperty("mes.col.2.formula", "{colLetter:A}2");
+        p.setProperty("mes.col.2.redIfNotEqualTo", "NoExiste");
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWorkbook("P-1")) {
+            new MesSheetBuilder(cfg, report).build(wb);
+        }
+
+        assertThat(report.warnings()).anyMatch(w ->
+                "CONFIG".equals(w.category)
+                        && w.message.contains("redIfNotEqualTo")
+                        && w.message.contains("NoExiste"));
+    }
 }

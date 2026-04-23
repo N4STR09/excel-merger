@@ -1,10 +1,12 @@
 # Changelog
 
-## [1.6.0] — Hoja resumen
+## [1.6.0] — Hoja resumen + tintado de columnas
 
-Minor que añade la hoja **Resumen** al libro de salida: una tabla con el sumatorio por matrícula de las columnas de horas de `Resultado` (`Jira`, `REAL`, `PDCL`, `PDCL + Deuda` por defecto) más una fila de totales. Inspirada en el cuaderno `DA23_*.xlsx` que se usa para el cierre mensual; simplificada para ser práctica y auditable desde Excel.
+Minor que añade la hoja **Resumen** al libro de salida (sumatorio por matrícula sobre las columnas de horas de `Resultado`) e introduce dos atributos configurables nuevos por columna de `Resultado`: `mes.col.N.fill` y `mes.col.N.redIfNotEqualTo`. Se simplifica `Resultado` eliminando las columnas `Desfase` y `Dif Mes` (que habían quedado como placeholders sin relleno real en el flujo actual).
 
 ### Añadido
+
+#### Hoja Resumen
 
 - Nueva clase `com.excelmerger.SummarySheetBuilder` en el paquete raíz, siguiendo el patrón de `MesSheetBuilder` y `AvisosSheetBuilder`. Recibe `ConfigLoader` y `RunReport` por constructor y expone `build(Workbook)`. Se engancha en `ExcelMerger.merge()` después de `DerivedSheetBuilder` y antes de `AvisosSheetBuilder` para que pueda leer la hoja `Resultado` ya construida.
 - Nuevas claves `summary.*` en `config.properties` (externo y fallback interno) y en `test-config.properties`:
@@ -14,25 +16,44 @@ Minor que añade la hoja **Resumen** al libro de salida: una tabla con el sumato
   - `summary.matriculaColumn` — nombre de la columna clave en `sumSheet`.
   - `summary.valueColumns` — lista CSV con las columnas a sumar.
   - `summary.sumifsMaxRow` — tope de fila para los rangos `SUMIFS` (default `10000`; acotado para que POI pueda evaluar en tests).
-- Nuevos métodos en `com.excelmerger.util.StyleFactory` con la paleta del cuaderno de referencia: `summaryBlockHeader`, `summarySubHeaderGray`, `summarySubHeaderOrange`, `summaryValueCell`, `summaryNumericCell`, `summaryTotalCell`, `summaryBalanceCell`, `summaryLavenderCell`. Los colores se fijan como ARGB exactos (`#000000`, `#C0C0C0`, `#FFCC99`, `#CCCCFF`, `#FFFF00`, `#FF0000`) con `XSSFColor(byte[], IndexedColorMap)`.
+- Nuevos métodos en `com.excelmerger.util.StyleFactory` con la paleta del cuaderno de referencia: `summaryBlockHeader`, `summarySubHeaderGray`, `summaryValueCell`, `summaryNumericCell`, `summaryTotalCell`, además del helper genérico `solidFill(Workbook, String argbHex)`.
 - `ConfigValidator.validateSummary()` — chequeos estáticos alineados con el resto de hojas (requeridos, colisión de nombre, referencia a hoja conocida).
-- `SummarySheetBuilderTest` — 10 casos nuevos cubriendo los escenarios habituales: deshabilitado, colisión de hoja, hoja origen inexistente, columna clave inexistente, columnas de valor parcialmente inexistentes (se omiten con warning, sin abortar), construcción básica, orden de matrículas (numéricas primero, luego strings), fórmulas `SUMIFS` con rangos acotados, fila de totales, registro en `RunReport`.
-- Columnas `PDCL` y `PDCL + Deuda` añadidas al `test-config.properties` para que los tests del Summary puedan validar las 4 columnas de valor configuradas por defecto. Sin cambios en los fixtures `extraccion.xlsx` ni `cierre.xlsx`, que mantienen sus magnitudes para no romper los tests existentes.
+
+#### Tintado de columnas de `Resultado`
+
+- Nuevo atributo `mes.col.N.fill=<COLOR>` — aplica fondo sólido permanente a todas las celdas de datos de la columna. Valores soportados: `LIGHT_GREEN` (`#E2EFDA`), `LIGHT_BLUE` (`#DDEBF7`), `LIGHT_YELLOW` (`#FFF2CC`), `LIGHT_RED` (`#FCE4D6`), `LIGHT_LAVENDER` (`#E4DFEC`). Nombres desconocidos generan un warning `CONFIG` y la columna se escribe sin fill.
+- Nuevo atributo `mes.col.N.redIfNotEqualTo=<NombreColumna>` — aplica un formato condicional que pinta el fondo en rojo claro cuando el valor de esta celda difiere del de la celda homóloga en la columna referenciada. Útil para resaltar filas donde `PDCL + Deuda` se ha modificado respecto a `PDCL`.
+- Configuración aplicada por defecto en `config.properties`:
+  - `mes.col.11` (`PDCL`) → `fill=LIGHT_GREEN`.
+  - `mes.col.12` (`PDCL + Deuda`) → `fill=LIGHT_GREEN` + `redIfNotEqualTo=PDCL`.
+
+#### Tests
+
+- `SummarySheetBuilderTest` — 10 casos cubriendo los escenarios habituales.
+- `MesSheetBuilderTest` — 4 casos nuevos: fill aplicado al estilo de las celdas, fill con color desconocido, CF `redIfNotEqualTo` con fórmula que contiene `<>`, redIfNotEqualTo apuntando a columna inexistente.
+- `ExcelMergerIntegrationTest` — nuevo test que verifica la hoja `Resumen` tras el pipeline completo.
+
+### Cambiado
+
+- **Eliminadas del `Resultado` las columnas `Desfase` y `Dif Mes`**. Eran placeholders en el flujo actual (`Desfase` tenía fórmula `{col:PDCL}-{col:REAL}` con `greenIfPositive=true`; `Dif Mes` era `EMPTY` con `greenIfPositive=true`). En `config.properties` principal y fallback, `Horas_RealizadoTot` y `Realizadas_Horas_Mes` se renumeran de `mes.col.15/16` a `mes.col.13/14` (la numeración debe ser consecutiva: `loadColumns()` corta al primer hueco). En `test-config.properties`, `Desfase` se elimina y `Matrícula`/`Res. Tecnico`/`PDCL`/`PDCL + Deuda` se renumeran de 7-10 a 6-9.
+- Columnas `PDCL` y `PDCL + Deuda` añadidas al `test-config.properties` para que los tests del Summary puedan validar las 4 columnas de valor configuradas por defecto.
 
 ### Diseño
 
 - **Auto-descubrimiento de matrículas**: se leen los valores no vacíos de la columna clave en `Resultado`. Las numéricas van ordenadas ascendentemente y después las no numéricas (por ejemplo `-` o `Sin Matricula`) en orden alfabético.
 - **Fórmulas SUMIFS con rangos acotados**: el cuaderno original usaba `I:I` (columna completa); aquí se acota a `I2:I10000` (configurable) para que `FormulaEvaluator` de POI pueda evaluarlas en los tests de integración. En Excel el rango sigue siendo más que suficiente para cualquier extracción mensual realista.
 - **Columnas de valor no encontradas**: se omiten silenciosamente con un warning `CABECERA` en `RunReport` en lugar de abortar la generación. Esto permite que el config pueda listar columnas opcionales (como `PDCL + Deuda`) sin romper si no están presentes.
-- **Estilos**: reutiliza la paleta capturada del cuaderno de referencia. Fila título con fondo negro y texto blanco en negrita; fila cabecera con fondo gris; fila totales con fondo gris, negrita y bordes medium; celdas de datos con formato numérico `0.0` y bordes finos.
+- **Fill permanente**: se aplica desde `MesSheetBuilder` celda por celda con un cache `LinkedHashMap<String, CellStyle>`. No toca las 4 estrategias de columna (`Copy/Sumifs/Formula/Empty`), solo la interfaz `MesColumnStrategy` se extiende con `getFillColor()` y `getRedIfNotEqualTo()`.
+- **Formato condicional `redIfNotEqualTo`**: se emite con fórmula relativa `X2<>Y2` y fill `IndexedColors.ROSE` (equivalente indexado de `#FCE4D6`); POI propaga la referencia al resto del rango automáticamente.
 
 ### Cambios de versión
 
 - `pom.xml` y `Main.APP_VERSION` pasan de `1.5.2` a `1.6.0`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado en consecuencia.
+- `SummarySheetBuilder` añadido a la exclusión `EI_EXPOSE_REP2` de `spotbugs-exclude.xml` (mismo patrón que los otros 5 builders: `RunReport` es por diseño un agregador compartido).
 
 ### Notas
 
-Esta versión se entregó tras un alcance inicial mucho mayor (réplica literal de los cuatro bloques del cuaderno `DA23_*.xlsx`: reparto, tickets, pre-cierre y matriz responsables × matrículas). Ese alcance se descartó a favor del resumen agregado simple por petición del usuario; el código intermedio no quedó en el árbol.
+La primera iteración replicaba los cuatro bloques del cuaderno `DA23_*.xlsx` (reparto, tickets, pre-cierre y matriz responsables × matrículas). Ese alcance se descartó a favor del resumen agregado simple por petición del usuario; el código intermedio no quedó en el árbol.
 
 ## [1.5.2] — Sesión E2: segunda pasada de calidad
 

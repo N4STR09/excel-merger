@@ -19,7 +19,12 @@ public final class CopyColumnStrategy extends AbstractMesColumnStrategy {
     private final String copyFromHeader;
 
     public CopyColumnStrategy(String name, boolean greenIfPositive, String copyFromHeader) {
-        super(name, greenIfPositive);
+        this(name, greenIfPositive, null, null, copyFromHeader);
+    }
+
+    public CopyColumnStrategy(String name, boolean greenIfPositive, String fillColor,
+                              String redIfNotEqualTo, String copyFromHeader) {
+        super(name, greenIfPositive, fillColor, redIfNotEqualTo);
         this.copyFromHeader = copyFromHeader;
     }
 

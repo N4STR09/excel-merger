@@ -225,8 +225,11 @@ Estructura fija de columnas definida en el config. Cada columna tiene un tipo:
 - **FORMULA** — fórmula libre con placeholders `{col:NombreColumnaMES}` y `{colLetter:X}`.
 - **EMPTY** — celda vacía (placeholder).
 
-Modificador:
+Modificadores opcionales por columna:
+
 - `greenIfPositive=true` — formato condicional: fondo verde si la celda es ≥ 0.
+- `fill=<COLOR>` — fondo sólido permanente para toda la columna. Valores: `LIGHT_GREEN` (`#E2EFDA`), `MEDIUM_GREEN` (`#C6E0B4`), `LIGHT_BLUE` (`#DDEBF7`), `LIGHT_YELLOW` (`#FFF2CC`), `LIGHT_RED` (`#FCE4D6`), `LIGHT_LAVENDER` (`#E4DFEC`). Nombres desconocidos generan un warning `CONFIG` y la columna se escribe sin fill.
+- `redIfNotEqualTo=<NombreColumna>` — formato condicional: pinta la celda de rojo claro cuando su valor difiere del de la celda homóloga en la columna referenciada (misma fila). Útil para resaltar diferencias entre dos columnas relacionadas.
 
 Ejemplo:
 
@@ -251,11 +254,19 @@ mes.col.10.name=REAL
 mes.col.10.type=FORMULA
 mes.col.10.formula={col:Jira}*1.2
 
-mes.col.13.name=Desfase
-mes.col.13.type=FORMULA
-mes.col.13.formula={col:PDCL}-{col:REAL}
-mes.col.13.greenIfPositive=true
+mes.col.11.name=PDCL
+mes.col.11.type=FORMULA
+mes.col.11.formula={col:Jira}*1.2
+mes.col.11.fill=LIGHT_GREEN
+
+mes.col.12.name=PDCL + Deuda
+mes.col.12.type=FORMULA
+mes.col.12.formula={col:PDCL}
+mes.col.12.fill=MEDIUM_GREEN
+mes.col.12.redIfNotEqualTo=PDCL
 ```
+
+En el ejemplo anterior, `PDCL` aparece sobre fondo verde muy claro y `PDCL + Deuda` sobre fondo verde un tono más oscuro; además, cualquier celda de `PDCL + Deuda` cuyo valor no coincida con el de `PDCL` en la misma fila se pinta en rojo claro, como alerta visual de modificaciones manuales.
 
 ### Hojas de lookup
 

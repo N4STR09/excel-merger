@@ -28,7 +28,13 @@ public final class SumIfsColumnStrategy extends AbstractMesColumnStrategy {
 
     public SumIfsColumnStrategy(String name, boolean greenIfPositive,
                                 String fromSheet, String sumHeader, List<String[]> matches) {
-        super(name, greenIfPositive);
+        this(name, greenIfPositive, null, null, fromSheet, sumHeader, matches);
+    }
+
+    public SumIfsColumnStrategy(String name, boolean greenIfPositive, String fillColor,
+                                String redIfNotEqualTo, String fromSheet, String sumHeader,
+                                List<String[]> matches) {
+        super(name, greenIfPositive, fillColor, redIfNotEqualTo);
         this.fromSheet = fromSheet;
         this.sumHeader = sumHeader;
         this.matches = Collections.unmodifiableList(matches);

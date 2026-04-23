@@ -19,15 +19,26 @@ public abstract class AbstractMesColumnStrategy implements MesColumnStrategy {
 
     protected final String name;
     protected final boolean greenIfPositive;
+    protected final String fillColor;
+    protected final String redIfNotEqualTo;
     protected boolean disabled;
 
     protected AbstractMesColumnStrategy(String name, boolean greenIfPositive) {
+        this(name, greenIfPositive, null, null);
+    }
+
+    protected AbstractMesColumnStrategy(String name, boolean greenIfPositive,
+                                        String fillColor, String redIfNotEqualTo) {
         this.name = name;
         this.greenIfPositive = greenIfPositive;
+        this.fillColor = fillColor;
+        this.redIfNotEqualTo = redIfNotEqualTo;
     }
 
     @Override public final String getName() { return name; }
     @Override public final boolean isGreenIfPositive() { return greenIfPositive; }
+    @Override public final String getFillColor() { return fillColor; }
+    @Override public final String getRedIfNotEqualTo() { return redIfNotEqualTo; }
     @Override public final boolean isDisabled() { return disabled; }
 
     /** Marca la columna como disabled: sus celdas se escribiran en blanco. */

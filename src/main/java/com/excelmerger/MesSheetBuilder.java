@@ -155,6 +155,12 @@ public class MesSheetBuilder {
         // --- Datos: una fila de MES por cada fila de origen con valor en la ancla ---
         int sourceLastRow = source.getLastRowNum();
         int mesRowIdx = 0;
+
+        // Cache de estilos de fill por nombre de color, reutilizable en todas
+        // las filas. POI no permite compartir CellStyle entre workbooks; dentro
+        // del mismo workbook sí, por eso cacheamos aquí.
+        Map<String, CellStyle> fillStyleCache = new LinkedHashMap<>();
+
         for (int srcR = sourceHeaderRow0 + 1; srcR <= sourceLastRow; srcR++) {
             Row srcRow = source.getRow(srcR);
             if (srcRow == null) continue;
@@ -172,11 +178,24 @@ public class MesSheetBuilder {
                 Cell target = mesRow.createCell(c);
                 col.writeCell(target, srcRow, source, sourceHeaderRow0,
                         workbook, sourceExcelRow, colByName, mesExcelRow);
+
+                // Fill permanente configurado con mes.col.N.fill=...
+                String fillName = col.getFillColor();
+                if (fillName != null) {
+                    CellStyle fillStyle = fillStyleCache.computeIfAbsent(
+                            fillName, k -> buildFillStyle(workbook, k));
+                    if (fillStyle != null) {
+                        target.setCellStyle(fillStyle);
+                    }
+                }
             }
         }
 
         // --- Formato condicional: verde si >= 0 ---
         applyConditionalFormatting(mes, columns, mesRowIdx);
+
+        // --- Formato condicional: rojo si valor != otra columna ---
+        applyRedIfNotEqualTo(mes, columns, colByName, mesRowIdx);
 
         // --- Detectar apps sin mapeo en VLOOKUP ---
         detectUnmappedVlookupKeys(mes, vlookupLinks, mesRowIdx);
@@ -223,6 +242,96 @@ public class MesSheetBuilder {
             };
             scf.addConditionalFormatting(range, rule);
             log.info("Formato condicional 'verde si >=0' aplicado a columna '" + col.getName() + "'.");
+        }
+    }
+
+    /**
+     * Construye un {@link CellStyle} con fill solido de uno de los nombres
+     * de color soportados para {@code mes.col.N.fill=...}. Si el nombre no
+     * se reconoce, registra un warning y devuelve {@code null}.
+     *
+     * <p>Colores soportados (alineados con IndexedColors):</p>
+     * <ul>
+     *   <li>{@code LIGHT_GREEN}  ({@code #E2EFDA})</li>
+     *   <li>{@code MEDIUM_GREEN} ({@code #C6E0B4})</li>
+     *   <li>{@code LIGHT_BLUE}   ({@code #DDEBF7})</li>
+     *   <li>{@code LIGHT_YELLOW} ({@code #FFF2CC})</li>
+     *   <li>{@code LIGHT_RED}    ({@code #FCE4D6})</li>
+     *   <li>{@code LIGHT_LAVENDER} ({@code #E4DFEC})</li>
+     * </ul>
+     */
+    private CellStyle buildFillStyle(Workbook workbook, String colorName) {
+        String hex = resolveFillHex(colorName);
+        if (hex == null) {
+            report.addWarning("CONFIG",
+                    "Color de fill desconocido '" + colorName
+                            + "'. Valores permitidos: LIGHT_GREEN, MEDIUM_GREEN, "
+                            + "LIGHT_BLUE, LIGHT_YELLOW, LIGHT_RED, LIGHT_LAVENDER.");
+            return null;
+        }
+        return StyleFactory.solidFill(workbook, hex);
+    }
+
+    private static String resolveFillHex(String colorName) {
+        if (colorName == null) return null;
+        switch (colorName.trim().toUpperCase()) {
+            case "LIGHT_GREEN":    return "FFE2EFDA";
+            case "MEDIUM_GREEN":   return "FFC6E0B4";
+            case "LIGHT_BLUE":     return "FFDDEBF7";
+            case "LIGHT_YELLOW":   return "FFFFF2CC";
+            case "LIGHT_RED":      return "FFFCE4D6";
+            case "LIGHT_LAVENDER": return "FFE4DFEC";
+            default:               return null;
+        }
+    }
+
+    /**
+     * Aplica un formato condicional "rojo claro si la celda difiere de otra
+     * columna" a cada columna marcada con {@code mes.col.N.redIfNotEqualTo=X}.
+     * La comparacion es por celda, fila a fila, usando referencias relativas
+     * en la formula del CF.
+     */
+    private void applyRedIfNotEqualTo(Sheet mes, List<MesColumnStrategy> columns,
+                                      Map<String, Integer> colByName, int lastDataRow) {
+        if (lastDataRow < 1) return;
+        SheetConditionalFormatting scf = mes.getSheetConditionalFormatting();
+
+        for (int i = 0; i < columns.size(); i++) {
+            MesColumnStrategy col = columns.get(i);
+            String refName = col.getRedIfNotEqualTo();
+            if (refName == null) continue;
+
+            Integer refIdx = colByName.get(refName);
+            if (refIdx == null) {
+                report.addWarning("CONFIG",
+                        "Columna '" + col.getName() + "' tiene redIfNotEqualTo='" + refName
+                                + "' pero esa columna no existe en MES. Regla omitida.");
+                continue;
+            }
+
+            String thisLetter = CellReference.convertNumToColString(i);
+            String refLetter  = CellReference.convertNumToColString(refIdx);
+
+            // Formula relativa: compara la celda actual con la celda homologa de
+            // la columna referenciada en la misma fila (primera fila de datos).
+            // POI traslada la referencia relativa al resto del rango automaticamente.
+            String formula = thisLetter + "2<>" + refLetter + "2";
+
+            ConditionalFormattingRule rule = scf.createConditionalFormattingRule(formula);
+            PatternFormatting pattern = rule.createPatternFormatting();
+            // IndexedColors.CORAL es un rojo-naranja saturado (aprox. #FF8080) que
+            // se ve claramente mas rojo que ROSE (mas rosa) y se lee bien como
+            // fondo sin ser agresivo. Se usa indexado para no depender de XSSF
+            // en el codigo de CF (mas simple y portable).
+            pattern.setFillBackgroundColor(IndexedColors.CORAL.getIndex());
+            pattern.setFillPattern(PatternFormatting.SOLID_FOREGROUND);
+
+            CellRangeAddress[] range = {
+                    CellRangeAddress.valueOf(thisLetter + "2:" + thisLetter + (lastDataRow + 1))
+            };
+            scf.addConditionalFormatting(range, rule);
+            log.info("Formato condicional 'rojo si != {}' aplicado a columna '{}'.",
+                    refName, col.getName());
         }
     }
 

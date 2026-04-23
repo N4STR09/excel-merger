@@ -57,6 +57,18 @@ public final class StyleFactory {
         return s;
     }
 
+    /**
+     * Estilo con fill solido de color ARGB arbitrario, sin fuente ni bordes.
+     * Pensado para columnas MES con {@code mes.col.N.fill=...}. Requiere
+     * que el workbook sea XSSF (siempre lo es en este proyecto).
+     */
+    public static CellStyle solidFill(Workbook wb, String argbHex) {
+        XSSFCellStyle s = (XSSFCellStyle) wb.createCellStyle();
+        s.setFillForegroundColor(argb(wb, argbHex));
+        s.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return s;
+    }
+
     // ==================================================================
     //  Estilos de la hoja Resumen (v1.6.0)
     // ==================================================================

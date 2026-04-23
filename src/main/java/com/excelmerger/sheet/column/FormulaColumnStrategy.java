@@ -25,7 +25,12 @@ public final class FormulaColumnStrategy extends AbstractMesColumnStrategy {
     private final String formulaTemplate;
 
     public FormulaColumnStrategy(String name, boolean greenIfPositive, String formulaTemplate) {
-        super(name, greenIfPositive);
+        this(name, greenIfPositive, null, null, formulaTemplate);
+    }
+
+    public FormulaColumnStrategy(String name, boolean greenIfPositive, String fillColor,
+                                 String redIfNotEqualTo, String formulaTemplate) {
+        super(name, greenIfPositive, fillColor, redIfNotEqualTo);
         this.formulaTemplate = formulaTemplate;
     }
 

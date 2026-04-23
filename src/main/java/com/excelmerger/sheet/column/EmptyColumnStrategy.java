@@ -15,7 +15,12 @@ import java.util.Map;
 public final class EmptyColumnStrategy extends AbstractMesColumnStrategy {
 
     public EmptyColumnStrategy(String name, boolean greenIfPositive) {
-        super(name, greenIfPositive);
+        this(name, greenIfPositive, null, null);
+    }
+
+    public EmptyColumnStrategy(String name, boolean greenIfPositive,
+                               String fillColor, String redIfNotEqualTo) {
+        super(name, greenIfPositive, fillColor, redIfNotEqualTo);
     }
 
     @Override

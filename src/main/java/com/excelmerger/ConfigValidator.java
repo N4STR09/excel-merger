@@ -40,6 +40,9 @@ public class ConfigValidator {
             Arrays.asList("SUM", "AVG", "COUNT", "MIN", "MAX"));
     private static final Set<String> VALID_MERGE_MODES = new LinkedHashSet<>(
             Arrays.asList("SHEETS_SEPARATE", "APPEND_ROWS"));
+    private static final Set<String> VALID_FILL_COLORS = new LinkedHashSet<>(
+            Arrays.asList("LIGHT_GREEN", "MEDIUM_GREEN", "LIGHT_BLUE",
+                    "LIGHT_YELLOW", "LIGHT_RED", "LIGHT_LAVENDER"));
 
     private static final Pattern PLACEHOLDER_COL = Pattern.compile("\\{col:([^}]+)\\}");
     private static final Pattern COLUMN_LETTER = Pattern.compile("[A-Za-z]+");
@@ -265,6 +268,32 @@ public class ConfigValidator {
                 default:
                     // nada
             }
+
+            // Validaciones transversales (aplicables a cualquier type)
+            validateFill(prefix, c.name);
+            validateRedIfNotEqualTo(prefix, c.name, colNames);
+        }
+    }
+
+    private void validateFill(String prefix, String colName) {
+        String fill = config.get(prefix + "fill", null);
+        if (fill == null || fill.trim().isEmpty()) return;
+        String normalized = fill.trim().toUpperCase();
+        if (!VALID_FILL_COLORS.contains(normalized)) {
+            errors.add(prefix + "fill: color desconocido '" + fill + "' en '" + colName
+                    + "'. Valores permitidos: " + VALID_FILL_COLORS + ".");
+        }
+    }
+
+    private void validateRedIfNotEqualTo(String prefix, String colName, Set<String> colNames) {
+        String ref = config.get(prefix + "redIfNotEqualTo", null);
+        if (ref == null || ref.trim().isEmpty()) return;
+        String refTrim = ref.trim();
+        if (!colNames.contains(refTrim)) {
+            errors.add(prefix + "redIfNotEqualTo: columna '" + refTrim + "' no existe en MES (columna '"
+                    + colName + "'). Columnas definidas: " + colNames + ".");
+        } else if (refTrim.equals(colName)) {
+            errors.add(prefix + "redIfNotEqualTo: no puede apuntar a si misma ('" + colName + "').");
         }
     }
 

@@ -27,6 +27,8 @@ public final class MesColumnStrategyFactory {
                                                String name, String type, RunReport report) {
         String prefix = "mes.col." + idx + ".";
         boolean greenIfPositive = config.getBoolean(prefix + "greenIfPositive", false);
+        String fillColor = nullIfBlank(config.get(prefix + "fill", null));
+        String redIfNotEqualTo = nullIfBlank(config.get(prefix + "redIfNotEqualTo", null));
         String normalizedType = type == null ? "" : type.trim().toUpperCase();
 
         switch (normalizedType) {
@@ -34,9 +36,9 @@ public final class MesColumnStrategyFactory {
                 String from = config.get(prefix + "from", null);
                 if (from == null) {
                     log.info("Columna '{}' (COPY) sin 'from'. Tratada como EMPTY.", name);
-                    return new EmptyColumnStrategy(name, greenIfPositive);
+                    return new EmptyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo);
                 }
-                return new CopyColumnStrategy(name, greenIfPositive, from);
+                return new CopyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo, from);
             }
             case "SUMIFS": {
                 String fromSheet = config.get(prefix + "from", null);
@@ -44,24 +46,31 @@ public final class MesColumnStrategyFactory {
                 List<String[]> matches = parseMatchExpression(config.get(prefix + "match", ""));
                 if (fromSheet == null || sumHeader == null || matches.isEmpty()) {
                     log.info("Columna '{}' (SUMIFS) mal configurada. Tratada como EMPTY.", name);
-                    return new EmptyColumnStrategy(name, greenIfPositive);
+                    return new EmptyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo);
                 }
-                return new SumIfsColumnStrategy(name, greenIfPositive, fromSheet, sumHeader, matches);
+                return new SumIfsColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo,
+                        fromSheet, sumHeader, matches);
             }
             case "FORMULA": {
                 String tpl = config.get(prefix + "formula", null);
                 if (tpl == null || tpl.trim().isEmpty()) {
                     log.info("Columna '{}' (FORMULA) sin 'formula'. Tratada como EMPTY.", name);
-                    return new EmptyColumnStrategy(name, greenIfPositive);
+                    return new EmptyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo);
                 }
-                return new FormulaColumnStrategy(name, greenIfPositive, tpl);
+                return new FormulaColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo, tpl);
             }
             case "EMPTY":
-                return new EmptyColumnStrategy(name, greenIfPositive);
+                return new EmptyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo);
             default:
                 log.info("Tipo '{}' desconocido en '{}'. Tratada como EMPTY.", type, name);
-                return new EmptyColumnStrategy(name, greenIfPositive);
+                return new EmptyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo);
         }
+    }
+
+    private static String nullIfBlank(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 
     /**

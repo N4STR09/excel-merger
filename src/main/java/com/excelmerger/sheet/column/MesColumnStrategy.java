@@ -32,8 +32,24 @@ public interface MesColumnStrategy {
     /** Nombre de la columna, tal y como se escribira en la cabecera. */
     String getName();
 
-    /** {@code true} si esta columna debe tener formato condicional "verde si >= 0". */
+    /** {@code true} si esta columna debe tener formato condicional "verde si &gt;= 0". */
     boolean isGreenIfPositive();
+
+    /**
+     * Color de fondo permanente aplicado a las celdas de esta columna
+     * (no formato condicional). {@code null} si la columna no lleva fill.
+     * Soportados: {@code LIGHT_GREEN}, {@code LIGHT_BLUE}, {@code LIGHT_YELLOW},
+     * {@code LIGHT_RED}, {@code LIGHT_LAVENDER}.
+     */
+    String getFillColor();
+
+    /**
+     * Nombre de otra columna MES con la que se compara en runtime: si
+     * el valor de ESTA celda es distinto del de la columna referenciada
+     * en la misma fila, se pinta el fondo de rojo claro. {@code null}
+     * si no aplica.
+     */
+    String getRedIfNotEqualTo();
 
     /**
      * {@code true} si {@code preValidate} detecto un problema y las celdas
