@@ -456,6 +456,106 @@ class ConfigValidatorTest {
         assertThat(errors).anyMatch(e -> e.contains("Lookup 'LL'"));
     }
 
+    // ==================================================================
+    //  Orphans (v1.7.0)
+    // ==================================================================
+
+    /**
+     * Base minima para validar {@code mes.orphans.*}: MES habilitado, con una
+     * columna, perfiles declarados (para que Cierre sea una hoja conocida),
+     * y Resultado distinto del nombre de la hoja de origen.
+     */
+    private static Properties baseForOrphans() {
+        Properties p = minimalValid();
+        p.setProperty("profiles", "Extraccion,Cierre");
+        p.setProperty("profile.Extraccion.sheetName", "Extraccion");
+        p.setProperty("profile.Extraccion.detect.headers", "Peticion,Recurso,Funcion,Titulo");
+        p.setProperty("profile.Cierre.sheetName", "Cierre");
+        p.setProperty("profile.Cierre.detect.headers", "Component Name,Matricula,Hours,Project Key");
+        p.setProperty("mes.enabled", "true");
+        p.setProperty("mes.sheetName", "Resultado");
+        p.setProperty("mes.sourceSheet", "Extraccion");
+        p.setProperty("mes.anchorColumn", "Peticion");
+        p.setProperty("mes.col.1.name", "Petición");
+        p.setProperty("mes.col.1.type", "COPY");
+        p.setProperty("mes.col.1.from", "Peticion");
+        p.setProperty("mes.col.2.name", "Matrícula");
+        p.setProperty("mes.col.2.type", "COPY");
+        p.setProperty("mes.col.2.from", "Recurso");
+        p.setProperty("mes.col.3.name", "Jira");
+        p.setProperty("mes.col.3.type", "SUMIFS");
+        p.setProperty("mes.col.3.from", "Cierre");
+        p.setProperty("mes.col.3.sum", "Hours");
+        p.setProperty("mes.col.3.match", "Component Name:Peticion,Matricula:Recurso");
+        return p;
+    }
+
+    @Test
+    void orphansDisabledNoValida() {
+        // Con mes.orphans.enabled=false (default), validateOrphans no
+        // acumula errores aunque el resto del config sea inconsistente.
+        Properties p = baseForOrphans();
+        p.setProperty("mes.orphans.sourceSheet", "NoExiste");
+        p.setProperty("mes.orphans.colPeticion", "ColumnaQueNoExiste");
+
+        List<String> errors = validatorFor(p).validate();
+
+        assertThat(errors).noneMatch(e -> e.contains("mes.orphans"));
+    }
+
+    @Test
+    void orphansEnabledConMesDeshabilitadoEsError() {
+        Properties p = minimalValid();
+        p.setProperty("mes.enabled", "false");
+        p.setProperty("mes.orphans.enabled", "true");
+
+        List<String> errors = validatorFor(p).validate();
+
+        assertThat(errors).anyMatch(e -> e.contains("mes.orphans.enabled=true pero mes.enabled=false"));
+    }
+
+    @Test
+    void orphansConSourceSheetDesconocidaEsError() {
+        Properties p = baseForOrphans();
+        p.setProperty("mes.orphans.enabled", "true");
+        p.setProperty("mes.orphans.sourceSheet", "HojaQueNoExiste");
+
+        List<String> errors = validatorFor(p).validate();
+
+        assertThat(errors).anyMatch(e ->
+                e.contains("mes.orphans.sourceSheet")
+                        && e.contains("HojaQueNoExiste"));
+    }
+
+    @Test
+    void orphansConColumnaMesInexistenteEsError() {
+        // mes.orphans.colPeticion debe apuntar a un mes.col.N.name real
+        Properties p = baseForOrphans();
+        p.setProperty("mes.orphans.enabled", "true");
+        p.setProperty("mes.orphans.sourceSheet", "Cierre");
+        p.setProperty("mes.orphans.colPeticion", "ColumnaQueNoExiste");
+
+        List<String> errors = validatorFor(p).validate();
+
+        assertThat(errors).anyMatch(e ->
+                e.contains("mes.orphans.colPeticion")
+                        && e.contains("ColumnaQueNoExiste"));
+    }
+
+    @Test
+    void orphansCompletoYValidoNoLevantaErrores() {
+        Properties p = baseForOrphans();
+        p.setProperty("mes.orphans.enabled", "true");
+        p.setProperty("mes.orphans.sourceSheet", "Cierre");
+        p.setProperty("mes.orphans.colPeticion", "Petición");
+        p.setProperty("mes.orphans.colMatricula", "Matrícula");
+        p.setProperty("mes.orphans.colJira", "Jira");
+
+        List<String> errors = validatorFor(p).validate();
+
+        assertThat(errors).noneMatch(e -> e.contains("mes.orphans"));
+    }
+
     @Test
     void validateEsIdempotente() {
         Properties p = new Properties();

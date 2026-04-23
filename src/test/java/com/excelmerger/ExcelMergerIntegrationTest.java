@@ -58,7 +58,7 @@ class ExcelMergerIntegrationTest {
     }
 
     @Test
-    void extraccionConservaSus16FilasIncluidaLaDePeticionVacia(@TempDir Path tmp) throws IOException {
+    void extraccionConservaSus19FilasIncluidaLaDePeticionVacia(@TempDir Path tmp) throws IOException {
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
 
@@ -67,8 +67,8 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet extraccion = wb.getSheet("Extraccion");
-            // 1 cabecera + 14 filas de datos + 1 fila con Peticion vacia = 16 filas
-            assertThat(extraccion.getLastRowNum() + 1).isEqualTo(16);
+            // 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 + 1 skip = 19
+            assertThat(extraccion.getLastRowNum() + 1).isEqualTo(19);
         }
     }
 
@@ -82,12 +82,21 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet mes = wb.getSheet("Resultado");
-            // 1 cabecera + 14 peticiones validas (la 15 con Peticion="" se salta)
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(15);
-            // Primera peticion
+            // 1 cabecera + 14 peticiones validas + 3 regresion v1.6.2 (la que
+            // tiene Peticion="" se salta)
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(18);
+            // Primera peticion (texto)
             assertThat(mes.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
-            // Ultima peticion (P-014)
+            // Ultima peticion de las filas "historicas" (index 14 = fila 15)
             assertThat(mes.getRow(14).getCell(0).getStringCellValue()).isEqualTo("P-014");
+            // Primera fila de regresion v1.6.2: Peticion=55751 en Extraccion
+            // venia como NUMERIC; tras asText.columns=Peticion,Recurso en el
+            // perfil, en Extraccion del workbook resultado aparece como
+            // STRING "55751", y CopyColumnStrategy la preserva como STRING
+            // aqui. El SUMIFS por tanto casa con Cierre.Component Name="55751"
+            // (tambien STRING) y recupera las horas.
+            assertThat(mes.getRow(15).getCell(0).getStringCellValue()).isEqualTo("55751");
+            assertThat(mes.getRow(17).getCell(0).getStringCellValue()).isEqualTo("138074");
         }
     }
 
@@ -158,6 +167,422 @@ class ExcelMergerIntegrationTest {
         }
     }
 
+    // ==================================================================
+    //  Regresion v1.6.2: mismatch de tipos numerico/textual en SUMIFS
+    // ==================================================================
+    //
+    // Los fixtures incluyen desde v1.6.2 tres peticiones con Peticion y
+    // Recurso como NUMERIC en Extraccion (55751, 101770, 138074 / 99642,
+    // 90014, 99641) y sus imputaciones correspondientes en Cierre con
+    // Component Name y Matricula como STRING. Antes del fix, el SUMIFS
+    // emitido para esas peticiones daba 0 por mismatch silencioso de
+    // tipos (criterio numerico + rango textual no casa).
+    //
+    // Con el fix, el perfil declara asText.columns=Peticion,Recurso en
+    // Extraccion (y Component Name,Matricula en Cierre), de forma que
+    // SheetCopier normaliza ambos lados a STRING antes de que se evaluen
+    // las formulas. El SUMIFS ve criterio y rango como texto y suma.
+
+    @Test
+    void sumifsRecuperaImputacionParaPeticionNumericaSimple(@TempDir Path tmp) throws IOException {
+        // Regresion: Peticion=55751 (num en Extraccion) con una unica
+        // imputacion en Cierre (PROJ-20, 7h, Dev). Esperado: Jira=7.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+            // La primera fila de regresion es la 16 (1-based) -> index 15.
+            // Columna Jira es index 3.
+            Row row = mes.getRow(15);
+            assertThat(row.getCell(0).getStringCellValue()).isEqualTo("55751");
+            CellValue value = evaluator.evaluate(row.getCell(3));
+            assertThat(value.getNumberValue())
+                    .as("SUMIFS para Peticion=55751 (normalizada a STRING) debe recuperar PROJ-20")
+                    .isEqualTo(7.0);
+        }
+    }
+
+    @Test
+    void sumifsRecuperaImputacionParaPeticionNumericaConVariasFilas(@TempDir Path tmp) throws IOException {
+        // Regresion: Peticion=101770 (num). Dos imputaciones en Cierre
+        // (PROJ-21 3h + PROJ-22 2h, ambas Dev). Esperado: Jira=5.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+            Row row = mes.getRow(16); // segunda fila de regresion
+            assertThat(row.getCell(0).getStringCellValue()).isEqualTo("101770");
+            CellValue value = evaluator.evaluate(row.getCell(3));
+            assertThat(value.getNumberValue())
+                    .as("SUMIFS debe sumar PROJ-21 + PROJ-22 tras normalizar tipos")
+                    .isEqualTo(5.0);
+        }
+    }
+
+    @Test
+    void sumifsRecuperaImputacionPeticionNumericaYSigueFiltrandoSup(@TempDir Path tmp) throws IOException {
+        // Regresion combinada: Peticion=138074 (num). En Cierre hay
+        // PROJ-23 (9h, Dev) y PROJ-24 (4h, Sup). Tras el fix, el SUMIFS
+        // debe (1) casar pese al mismatch de tipo y (2) seguir filtrando
+        // por Funcion=Dev. Esperado: Jira=9, no 13.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+            Row row = mes.getRow(17); // tercera fila de regresion
+            assertThat(row.getCell(0).getStringCellValue()).isEqualTo("138074");
+            CellValue value = evaluator.evaluate(row.getCell(3));
+            assertThat(value.getNumberValue())
+                    .as("Jira debe contar PROJ-23 (Dev) y excluir PROJ-24 (Sup)")
+                    .isEqualTo(9.0);
+        }
+    }
+
+    @Test
+    void extraccionEnResultadoTienePeticionYRecursoComoStringTrasAsText(@TempDir Path tmp) throws IOException {
+        // Verifica directamente la garantia del fix: las celdas de
+        // Peticion y Recurso en la hoja Extraccion del workbook
+        // resultado son de tipo STRING, aunque en el fixture original
+        // algunas son NUMERIC.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet ext = wb.getSheet("Extraccion");
+            // Cabecera en fila 1 (index 0). Las filas de regresion son 16,
+            // 17 y 18 (index 15, 16, 17). Peticion=col 0, Recurso=col 11.
+            for (int r : new int[] {15, 16, 17}) {
+                org.apache.poi.ss.usermodel.Cell pet = ext.getRow(r).getCell(0);
+                org.apache.poi.ss.usermodel.Cell rec = ext.getRow(r).getCell(11);
+                assertThat(pet.getCellType())
+                        .as("Peticion en fila " + (r + 1) + " debe ser STRING tras asText")
+                        .isEqualTo(org.apache.poi.ss.usermodel.CellType.STRING);
+                assertThat(rec.getCellType())
+                        .as("Recurso en fila " + (r + 1) + " debe ser STRING tras asText")
+                        .isEqualTo(org.apache.poi.ss.usermodel.CellType.STRING);
+            }
+            // Las filas historicas (texto) deben seguir siendo STRING
+            // (no las rompemos accidentalmente al forzar tipo).
+            assertThat(ext.getRow(1).getCell(0).getCellType())
+                    .isEqualTo(org.apache.poi.ss.usermodel.CellType.STRING);
+            assertThat(ext.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
+        }
+    }
+
+    @Test
+    void asTextColumnsConCabeceraInexistenteEmiteWarning(@TempDir Path tmp) throws IOException {
+        // Si el usuario configura asText.columns con una cabecera que no
+        // existe en la hoja del perfil, el merge no rompe: simplemente
+        // se ignora esa columna y se emite un warning CABECERA en el
+        // RunReport para que sea visible en la hoja _Avisos y en el log.
+        Path inputDir = tmp.resolve("input");
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        TestFixtures.copyFixturesTo(inputDir);
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        // Reemplazamos la clave por una que mezcla una cabecera real con
+        // una inexistente.
+        String content = Files.readString(cfgFile);
+        content = content.replace(
+                "profile.Extraccion.asText.columns=Peticion,Recurso",
+                "profile.Extraccion.asText.columns=Peticion,ColumnaQueNoExiste");
+        Files.writeString(cfgFile, content);
+
+        ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
+        RunReport report = new RunReport();
+        new ExcelMerger(cfg, report).merge();
+
+        assertThat(report.warnings()).anyMatch(w ->
+                "CABECERA".equals(w.category)
+                        && w.message.contains("ColumnaQueNoExiste")
+                        && w.message.contains("asText.columns"));
+    }
+
+    // ==================================================================
+    //  Huerfanos (v1.7.0): filas de Resultado para imputaciones de Cierre
+    //  sin contrapartida (Peticion, Recurso) en Extraccion.
+    // ==================================================================
+    //
+    // Los fixtures incluyen desde v1.7.0 cuatro imputaciones huerfanas:
+    //   (TICKETS, -)              2 imputaciones x 4h = 8h
+    //   (VACACIONES, 90014)       1 imputacion de 3h    (90014 existe en
+    //                                                    Extraccion, pero
+    //                                                    asociada a 101770)
+    //   (P-001, MAT-HUERFANO)     1 imputacion de 1h    (P-001 existe, pero
+    //                                                    con M-1001 no con
+    //                                                    MAT-HUERFANO)
+    //
+    // Con mes.orphans.enabled=false (default del test-config) ninguna de
+    // estas imputaciones aparece en Resultado. Con enabled=true aparecen
+    // como filas adicionales, ordenadas segun el criterio numerico-primero.
+
+    private static ConfigLoader buildConfigWithOrphansEnabled(Path tmp) throws IOException {
+        Path inputDir = tmp.resolve("input");
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        TestFixtures.copyFixturesTo(inputDir);
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        String content = Files.readString(cfgFile);
+        content = content.replace(
+                "mes.orphans.enabled=false",
+                "mes.orphans.enabled=true");
+        Files.writeString(cfgFile, content);
+        return new ConfigLoader(cfgFile.toString());
+    }
+
+    @Test
+    void orphansEnabledAnadeFilasParaImputacionesSinContrapartida(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            // Antes: 1 cabecera + 14 texto + 3 regresion = 18 filas.
+            // Ahora: + 3 huerfanos (TICKETS/-, VACACIONES/90014, P-001/MAT-HUERFANO) = 21.
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(21);
+
+            // Construir mapa (Peticion, Matricula) -> fila para buscar los huerfanos.
+            java.util.Map<String, Integer> rowByPair = new java.util.LinkedHashMap<>();
+            for (int r = 1; r <= mes.getLastRowNum(); r++) {
+                String pet = mes.getRow(r).getCell(0).getStringCellValue();
+                String mat = mes.getRow(r).getCell(5).getStringCellValue();
+                rowByPair.put(pet + "|" + mat, r);
+            }
+
+            assertThat(rowByPair).containsKey("TICKETS|-");
+            assertThat(rowByPair).containsKey("VACACIONES|90014");
+            assertThat(rowByPair).containsKey("P-001|MAT-HUERFANO");
+
+            // Verificar horas agregadas en cada fila huerfana
+            int rTickets = rowByPair.get("TICKETS|-");
+            int rVac = rowByPair.get("VACACIONES|90014");
+            int rP001H = rowByPair.get("P-001|MAT-HUERFANO");
+
+            assertThat(mes.getRow(rTickets).getCell(3).getNumericCellValue()).isEqualTo(8.0);
+            assertThat(mes.getRow(rVac).getCell(3).getNumericCellValue()).isEqualTo(3.0);
+            assertThat(mes.getRow(rP001H).getCell(3).getNumericCellValue()).isEqualTo(1.0);
+        }
+    }
+
+    @Test
+    void orphansEnabledFilasOrdenadasNumericasPrimero(@TempDir Path tmp) throws IOException {
+        // Orden: numericas ASC primero, no numericas alfabetico al final.
+        // Peticiones numericas: 55751, 101770, 138074.
+        // No numericas: MAT-HUERFANO no, eso es matricula; la Peticion de ese
+        //               huerfano es "P-001" que ya existe. Las no numericas
+        //               son: P-001..P-014, TICKETS, VACACIONES.
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            // Las tres primeras filas de datos deben ser las peticiones
+            // numericas ordenadas ascendente.
+            assertThat(mes.getRow(1).getCell(0).getStringCellValue()).isEqualTo("55751");
+            assertThat(mes.getRow(2).getCell(0).getStringCellValue()).isEqualTo("101770");
+            assertThat(mes.getRow(3).getCell(0).getStringCellValue()).isEqualTo("138074");
+
+            // La ultima fila de datos debe ser VACACIONES (alfabeticamente
+            // la mayor de las no numericas presentes).
+            int last = mes.getLastRowNum();
+            assertThat(mes.getRow(last).getCell(0).getStringCellValue()).isEqualTo("VACACIONES");
+            // La anterior a la ultima debe ser TICKETS.
+            assertThat(mes.getRow(last - 1).getCell(0).getStringCellValue()).isEqualTo("TICKETS");
+        }
+    }
+
+    @Test
+    void orphansEnabledColumnasSinDatoRecibenLiteralGuion(@TempDir Path tmp) throws IOException {
+        // En las filas huerfanas, columnas como Aplicacion, Titulo, Departamento,
+        // Estado, Res. Tecnico reciben un literal "-" porque no hay info de
+        // Extraccion asociada.
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            // Buscar la fila TICKETS/- y verificar columnas "-"
+            for (int r = 1; r <= mes.getLastRowNum(); r++) {
+                String pet = mes.getRow(r).getCell(0).getStringCellValue();
+                if (!"TICKETS".equals(pet)) continue;
+                // Columnas MES en test-config:
+                //  0=Petición, 1=Aplicación, 2=Equipo, 3=Jira, 4=REAL,
+                //  5=Matrícula, 6=Res. Tecnico, 7=PDCL, 8=PDCL + Deuda.
+                assertThat(mes.getRow(r).getCell(1).getStringCellValue()).isEqualTo("-");
+                assertThat(mes.getRow(r).getCell(6).getStringCellValue()).isEqualTo("-");
+                return;
+            }
+            throw new AssertionError("No se encontro fila TICKETS en Resultado");
+        }
+    }
+
+    @Test
+    void orphansEnabledColumnasFormulaCalculanJiraPor12(@TempDir Path tmp) throws IOException {
+        // REAL, PDCL, PDCL+Deuda son columnas FORMULA con plantilla *1.2
+        // (o referencia a PDCL). En huerfanos deben evaluar igual que en
+        // filas normales: Jira*1.2 y la cascada.
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            for (int r = 1; r <= mes.getLastRowNum(); r++) {
+                String pet = mes.getRow(r).getCell(0).getStringCellValue();
+                if (!"TICKETS".equals(pet)) continue;
+                // Jira=8.0, REAL=9.6, PDCL=9.6, PDCL+Deuda=9.6
+                assertThat(mes.getRow(r).getCell(3).getNumericCellValue()).isEqualTo(8.0);
+                CellValue real = evaluator.evaluate(mes.getRow(r).getCell(4));
+                assertThat(real.getNumberValue()).isEqualTo(9.6);
+                CellValue pdcl = evaluator.evaluate(mes.getRow(r).getCell(7));
+                assertThat(pdcl.getNumberValue()).isEqualTo(9.6);
+                CellValue pdclPlus = evaluator.evaluate(mes.getRow(r).getCell(8));
+                assertThat(pdclPlus.getNumberValue()).isEqualTo(9.6);
+                return;
+            }
+            throw new AssertionError("No se encontro fila TICKETS en Resultado");
+        }
+    }
+
+    @Test
+    void orphansEnabledNoGeneraWarningLookupParaGuion(@TempDir Path tmp) throws IOException {
+        // El valor "-" puesto en Aplicacion de las filas huerfanas no debe
+        // contabilizarse como "app sin mapeo" en el lookup Equipos. Solo
+        // deben aparecer warnings LOOKUP para apps reales (ZZ en el fixture).
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        RunReport report = new RunReport();
+        new ExcelMerger(cfg, report).merge();
+
+        boolean guionEnWarnings = report.warnings().stream()
+                .anyMatch(w -> "LOOKUP".equals(w.category) && w.message.contains("'-'"));
+        assertThat(guionEnWarnings)
+                .as("El sentinela '-' no debe considerarse app sin mapeo")
+                .isFalse();
+    }
+
+    @Test
+    void orphansEnabledHuerfanoAparecEnResultadoConSuMatricula(@TempDir Path tmp) throws IOException {
+        // Verifica que la fila huerfana VACACIONES/90014/3h aparece en
+        // Resultado con la matricula correcta, lista para que Resumen
+        // la sume por matricula.
+        //
+        // NOTA (v1.7.0): este test *no* evalua el total en Resumen a
+        // proposito. Hay un bug latente descubierto al escribir esta
+        // feature: SummarySheetBuilder escribe las matriculas todo-digito
+        // como NUMERIC en la columna clave, mientras que las celdas
+        // Matricula de Resultado son STRING (por el fix 1.6.2 asText).
+        // El SUMIFS de Resumen con criterio NUMERIC contra rango STRING
+        // no casa en Excel, por lo que las matriculas numericas suman 0
+        // en Resumen incluso sin huerfanos. Este bug es preexistente al
+        // 1.7.0 (ya se daba con 55751/99642/etc. en 1.6.2) pero solo se
+        // hace visible al evaluar la formula con FormulaEvaluator, cosa
+        // que los tests existentes no hacen. Se documenta en CHANGELOG
+        // 1.7.0 como "pendiente conocido, bug C".
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            // Buscar fila de VACACIONES y verificar su matricula y horas
+            for (int r = 1; r <= mes.getLastRowNum(); r++) {
+                String pet = mes.getRow(r).getCell(0).getStringCellValue();
+                if (!"VACACIONES".equals(pet)) continue;
+                assertThat(mes.getRow(r).getCell(5).getStringCellValue())
+                        .as("La matricula del huerfano VACACIONES debe ser '90014'")
+                        .isEqualTo("90014");
+                assertThat(mes.getRow(r).getCell(3).getNumericCellValue())
+                        .as("Las horas del huerfano VACACIONES deben ser 3")
+                        .isEqualTo(3.0);
+                return;
+            }
+            throw new AssertionError("No se encontro fila VACACIONES en Resultado");
+        }
+    }
+
+    @Test
+    void orphansDisabledMantieneComportamiento16Point2(@TempDir Path tmp) throws IOException {
+        // Test de regresion: con enabled=false (default del test-config)
+        // Resultado tiene exactamente 18 filas y nada nuevo.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(18);
+            // Primera fila de datos sigue siendo P-001 (orden natural de
+            // Extraccion, sin reordenar).
+            assertThat(mes.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
+        }
+    }
+
+    @Test
+    void orphansEnabledConSheetInexistenteEmiteWarning(@TempDir Path tmp) throws IOException {
+        // Si mes.orphans.sourceSheet apunta a una hoja que no existe en
+        // el workbook, el merge emite warning y continua sin huerfanos.
+        Path inputDir = tmp.resolve("input");
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        TestFixtures.copyFixturesTo(inputDir);
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        String content = Files.readString(cfgFile);
+        content = content.replace("mes.orphans.enabled=false", "mes.orphans.enabled=true");
+        content = content.replace("mes.orphans.sourceSheet=Cierre",
+                "mes.orphans.sourceSheet=HojaQueNoExiste");
+        Files.writeString(cfgFile, content);
+
+        ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
+        RunReport report = new RunReport();
+        new ExcelMerger(cfg, report).merge();
+
+        assertThat(report.warnings()).anyMatch(w ->
+                "HOJA".equals(w.category) && w.message.contains("HojaQueNoExiste"));
+        // Y Resultado sigue teniendo 18 filas (sin huerfanos)
+        try (FileInputStream fis = new FileInputStream(outputFile.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            assertThat(wb.getSheet("Resultado").getLastRowNum() + 1).isEqualTo(18);
+        }
+    }
+
     @Test
     void mesColRealUsaFormulaConReferenciaAColumnaJira(@TempDir Path tmp) throws IOException {
         // REAL es la columna 5 (index 4). Su plantilla es "{col:Jira}*1.2".
@@ -194,12 +619,12 @@ class ExcelMergerIntegrationTest {
 
         new ExcelMerger(cfg, report).merge();
 
-        // MES = 1 cabecera + 14 filas
-        assertThat(report.sheets()).containsEntry("Resultado", 15);
+        // MES = 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 = 18
+        assertThat(report.sheets()).containsEntry("Resultado", 18);
         // Equipos = 1 cabecera + 10 entradas (de test-config.properties)
         assertThat(report.sheets()).containsEntry("Equipos", 11);
-        // Extraccion = 1 cabecera + 14 + 1 (la de Peticion vacia se copia igual)
-        assertThat(report.sheets()).containsEntry("Extraccion", 16);
+        // Extraccion = 1 cabecera + 14 texto + 3 regresion + 1 Peticion vacia = 19
+        assertThat(report.sheets()).containsEntry("Extraccion", 19);
     }
 
     @Test

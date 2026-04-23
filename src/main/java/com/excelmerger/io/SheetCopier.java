@@ -9,14 +9,21 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellRangeAddress;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Copia hojas completas (o filas sueltas) entre workbooks de POI. Respeta
  * alturas de fila, anchos de columna, regiones fusionadas y, opcionalmente,
  * los estilos de celda (clonando cada estilo distinto una unica vez por
  * copia, para evitar el limite de estilos de Excel).
+ *
+ * <p>v1.6.2: las sobrecargas que aceptan {@code asTextColumnIndexes} copian
+ * esas columnas como STRING (ver {@link PoiUtils#copyCellValueAsText}) a
+ * partir de la fila indicada en {@code firstDataRow0}. Las filas por encima
+ * (cabecera y metadatos) se copian sin transformar.</p>
  */
 public final class SheetCopier {
 
@@ -37,6 +44,24 @@ public final class SheetCopier {
      * es local a esta invocacion.
      */
     public void copySheet(Sheet source, Sheet target, Workbook targetWb) {
+        copySheet(source, target, targetWb, Collections.emptySet(), 0);
+    }
+
+    /**
+     * Variante de {@link #copySheet(Sheet, Sheet, Workbook)} que fuerza a
+     * STRING las celdas de {@code asTextColumnIndexes} a partir de la fila
+     * {@code firstDataRow0} (0-based) inclusive. Las cabeceras y filas por
+     * encima se copian intactas.
+     *
+     * @param asTextColumnIndexes indices 0-based de columnas cuyo valor se
+     *                            fuerza a STRING. Puede estar vacio.
+     * @param firstDataRow0       primera fila (0-based) a partir de la cual
+     *                            se aplica la transformacion. Habitualmente,
+     *                            {@code headerRow - 1 + 1 = headerRow}
+     *                            (convertido de 1-based a 0-based).
+     */
+    public void copySheet(Sheet source, Sheet target, Workbook targetWb,
+                          Set<Integer> asTextColumnIndexes, int firstDataRow0) {
         Map<Integer, CellStyle> styleCache = new HashMap<>();
 
         for (int r = 0; r <= source.getLastRowNum(); r++) {
@@ -44,7 +69,9 @@ public final class SheetCopier {
             if (sourceRow == null) continue;
             Row targetRow = target.createRow(r);
             targetRow.setHeight(sourceRow.getHeight());
-            copyRow(sourceRow, targetRow, targetWb, styleCache);
+            boolean applyAsText = r >= firstDataRow0 && !asTextColumnIndexes.isEmpty();
+            copyRow(sourceRow, targetRow, targetWb, styleCache,
+                    applyAsText ? asTextColumnIndexes : Collections.emptySet());
         }
 
         int maxCols = PoiUtils.countColumns(source);
@@ -64,11 +91,25 @@ public final class SheetCopier {
      */
     public void copyRow(Row sourceRow, Row targetRow, Workbook targetWb,
                         Map<Integer, CellStyle> styleCache) {
+        copyRow(sourceRow, targetRow, targetWb, styleCache, Collections.emptySet());
+    }
+
+    /**
+     * Variante que fuerza a STRING las celdas de {@code asTextColumnIndexes}
+     * en esta fila. El resto de columnas se copian preservando tipo.
+     */
+    public void copyRow(Row sourceRow, Row targetRow, Workbook targetWb,
+                        Map<Integer, CellStyle> styleCache,
+                        Set<Integer> asTextColumnIndexes) {
         for (int c = 0; c < sourceRow.getLastCellNum(); c++) {
             Cell sourceCell = sourceRow.getCell(c);
             if (sourceCell == null) continue;
             Cell targetCell = targetRow.createCell(c);
-            PoiUtils.copyCellValue(sourceCell, targetCell);
+            if (asTextColumnIndexes.contains(c)) {
+                PoiUtils.copyCellValueAsText(sourceCell, targetCell);
+            } else {
+                PoiUtils.copyCellValue(sourceCell, targetCell);
+            }
 
             if (copyStyles) {
                 int styleHash = sourceCell.getCellStyle().hashCode();

@@ -5,6 +5,7 @@ import com.excelmerger.io.FileLockDetector;
 import com.excelmerger.io.InputFileDetector;
 import com.excelmerger.io.OutputManager;
 import com.excelmerger.io.SheetCopier;
+import com.excelmerger.util.PoiUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,9 +21,11 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Motor principal de fusion de ficheros Excel. <b>Orquestador puro</b> que
@@ -216,6 +219,8 @@ public class ExcelMerger {
 
     private void copyAllSheetsFrom(Workbook source, Workbook result,
                                    FileProfileResolver.FileProfile profile, String label) {
+        Set<Integer> asTextIdx = resolveAsTextIndexes(source, profile);
+        int firstDataRow0 = profile == null ? 0 : profile.getHeaderRow();
         int count = source.getNumberOfSheets();
         for (int i = 0; i < count; i++) {
             Sheet src = source.getSheetAt(i);
@@ -223,11 +228,57 @@ public class ExcelMerger {
             String finalName = ensureUniqueSheetName(result, desiredName);
 
             Sheet target = result.createSheet(finalName);
-            sheetCopier.copySheet(src, target, result);
+            boolean applyAsText = profile != null
+                    && i == profile.sheetIndex
+                    && !asTextIdx.isEmpty();
+            if (applyAsText) {
+                sheetCopier.copySheet(src, target, result, asTextIdx, firstDataRow0);
+            } else {
+                sheetCopier.copySheet(src, target, result);
+            }
             int rows = src.getLastRowNum() + 1;
             report.addSheet(finalName, rows);
             log.info("Hoja copiada desde {}: '{}'  ->  '{}' ({} filas)",
                     label, src.getSheetName(), finalName, rows);
+        }
+    }
+
+    /**
+     * Calcula los indices 0-based de las columnas que deben copiarse a STRING
+     * para este perfil, y emite warnings {@code CABECERA} para las cabeceras
+     * declaradas en {@code asText.columns} que no se han encontrado en la
+     * hoja principal del perfil. Devuelve un set vacio si no hay perfil o
+     * no hay declaradas.
+     */
+    private Set<Integer> resolveAsTextIndexes(Workbook source,
+                                              FileProfileResolver.FileProfile profile) {
+        if (profile == null) {
+            return Collections.emptySet();
+        }
+        List<String> declared = profile.getAsTextColumns();
+        if (declared.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Sheet mainSrc = source.getSheetAt(profile.sheetIndex);
+        Set<Integer> resolved = profile.resolveAsTextColumnIndexes(mainSrc);
+        if (resolved.size() < declared.size()) {
+            warnMissingAsTextHeaders(mainSrc, profile, declared);
+        }
+        return resolved;
+    }
+
+    private void warnMissingAsTextHeaders(Sheet mainSrc,
+                                          FileProfileResolver.FileProfile profile,
+                                          List<String> declared) {
+        Row header = mainSrc.getRow(profile.getHeaderRow() - 1);
+        for (String col : declared) {
+            int idx = header == null ? -1 : PoiUtils.findColumnIndex(header, col);
+            if (idx < 0) {
+                report.addWarning("CABECERA",
+                        "Columna '" + col + "' declarada en 'profile."
+                                + profile.getId() + ".asText.columns' no se encontro en '"
+                                + mainSrc.getSheetName() + "'; se ignora.");
+            }
         }
     }
 

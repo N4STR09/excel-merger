@@ -57,6 +57,10 @@ class MainTest {
         // Este test fija la expectativa de versión al bump acordado.
         // Si se sube la versión, este test debe actualizarse conscientemente.
         // 1.6.0: hoja "Resumen" (sumatorio por matrícula sobre Resultado).
-        assertThat(Main.APP_VERSION).isEqualTo("1.6.0");
+        // 1.6.2: fix del SUMIFS de Jira que dejaba fuera imputaciones por
+        //        mismatch numerico/textual entre Extraccion y Cierre.
+        // 1.7.0: filas huerfanas en Resultado (imputaciones de Cierre sin
+        //        contrapartida en Extraccion). Opt-in via mes.orphans.enabled.
+        assertThat(Main.APP_VERSION).isEqualTo("1.7.0");
     }
 }

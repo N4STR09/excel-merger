@@ -1,5 +1,131 @@
 # Changelog
 
+## [1.7.0] — Filas huérfanas en Resultado
+
+Minor opt-in. `Resultado` puede ahora incluir **filas adicionales** para las imputaciones de `Cierre` que no tienen contrapartida `(Peticion, Recurso)` en `Extracción`. Sobre los inputs reales del usuario esto son ~35 imputaciones con ~988 horas que el 1.6.2 dejaba fuera (el `SUMIFS` de Jira no las recogía porque no había fila destino para ellas). Con `mes.orphans.enabled=true` esas imputaciones pasan a aparecer como filas huérfanas en `Resultado`, con la matrícula correspondiente, las horas totales agrupadas por par `(Component Name, Matrícula)`, y fórmulas `REAL`/`PDCL`/`PDCL + Deuda` calculadas con la misma cascada `*1.2`. `Resumen` suma estas filas automáticamente por matrícula.
+
+### Añadido
+
+- Nueva sección `mes.orphans.*` en `config.properties`:
+  - `mes.orphans.enabled` (default `false`) — opt-in explícito. El comportamiento del 1.6.2 queda intacto mientras no se active.
+  - `mes.orphans.sourceSheet` (default `Cierre`) — hoja de la que extraer imputaciones huérfanas.
+  - `mes.orphans.matchComponent` (default `Component Name`), `mes.orphans.matchMatricula` (default `Matricula`), `mes.orphans.sumColumn` (default `Hours`) — cabeceras de esa hoja usadas como clave de cruce y columna a sumar.
+  - `mes.orphans.colPeticion`, `mes.orphans.colMatricula`, `mes.orphans.colJira` — nombres de las columnas MES que reciben respectivamente el `Component Name`, la matrícula y las horas agregadas. Deben coincidir con los `mes.col.N.name` definidos.
+- Orden configurable implícito de `Resultado` cuando se activa: peticiones numéricas ascendente primero, no numéricas en orden alfabético al final. Esto también reordena las filas normales, que hasta 1.6.2 heredaban el orden de `Extracción`.
+- `ConfigValidator.validateOrphans()` — valida cuando `enabled=true`: `mes.enabled=true`, `sourceSheet` referencia a hoja conocida, `colPeticion`/`colMatricula`/`colJira` apuntan a columnas MES definidas.
+- `MesSheetBuilder` ampliado con:
+  - Clase interna `RowSource` — fuente de una fila de `Resultado`, bien de `Extracción` (con su `srcRow` y número Excel de origen) o huérfana (con `Peticion`, `Matrícula`, `Hours` ya agregadas).
+  - `collectOrphans(...)` — agrupa imputaciones de `Cierre` por `(CN, Mat)` sumando horas, excluyendo las que sí casan con Extracción.
+  - `loadExtractionPairKeys(...)` — set de claves `(Peticion|Recurso)` existentes en Extracción.
+  - `writeOrphanCell(...)` — escribe cada columna para una fila huérfana: las columnas configuradas (`colPeticion`/`colMatricula`/`colJira`) reciben el dato del huérfano, las columnas `FORMULA` (`REAL`, `PDCL`, `PDCL + Deuda`, `Equipo`) se resuelven con sus plantillas habituales (funcionan igual sin `srcRow`), y el resto (`COPY` de otros campos, `EMPTY`) reciben un literal `"-"`.
+  - `sortRowSources(...)` con clave `SortKey` — ordena numéricas ASC primero, no numéricas alfabético al final.
+
+### Cambiado
+
+- `MesSheetBuilder.detectUnmappedVlookupKeys` ignora ahora el sentinela `"-"` para no emitir warnings falsos de "apps sin mapeo" cuando las filas huérfanas rellenan `Aplicación` con `"-"`.
+- El bucle de escritura de datos en `MesSheetBuilder` se ha refactorizado a dos pasadas (recolectar → ordenar → escribir). La primera pasada itera `Extracción` igual que antes; la segunda pasada añade huérfanos e invoca el sort solo si `orphans.enabled=true`. Si está desactivado, la primera pasada se escribe sin ordenar y el orden heredado de `Extracción` se preserva exactamente como en 1.6.2.
+
+### Tests
+
+- `ExcelMergerIntegrationTest` — ocho tests nuevos:
+  - `orphansEnabledAnadeFilasParaImputacionesSinContrapartida` — verifica que las tres parejas huérfanas (`TICKETS/-`, `VACACIONES/90014`, `P-001/MAT-HUERFANO`) aparecen con sus horas agregadas correctas (`8`, `3`, `1`).
+  - `orphansEnabledFilasOrdenadasNumericasPrimero` — verifica el orden: `55751`, `101770`, `138074` en las tres primeras posiciones; `TICKETS`, `VACACIONES` en las últimas.
+  - `orphansEnabledColumnasSinDatoRecibenLiteralGuion` — verifica que `Aplicación`, `Res. Tecnico` en filas huérfanas son `"-"`.
+  - `orphansEnabledColumnasFormulaCalculanJiraPor12` — evalúa con `FormulaEvaluator` que `REAL=9.6`, `PDCL=9.6`, `PDCL+Deuda=9.6` para `TICKETS` (`Jira=8`).
+  - `orphansEnabledNoGeneraWarningLookupParaGuion` — verifica que `"-"` no se cuenta como app sin mapeo en el lookup `Equipos`.
+  - `orphansEnabledHuerfanoAparecEnResultadoConSuMatricula` — verifica que el huérfano `VACACIONES/90014/3h` aparece en `Resultado` con su matrícula correcta. No evalúa el total en `Resumen` a propósito; ver "Pendiente conocido fuera de alcance" más abajo para el bug C descubierto durante los tests.
+  - `orphansDisabledMantieneComportamiento16Point2` — regresión: con `enabled=false`, `Resultado` tiene 18 filas y la primera es `P-001`.
+  - `orphansEnabledConSheetInexistenteEmiteWarning` — caso degradado: si `sourceSheet` apunta a una hoja inexistente, el merge continúa sin huérfanos y emite warning `HOJA`.
+- `ConfigValidatorTest` — cinco tests nuevos: `orphansDisabledNoValida`, `orphansEnabledConMesDeshabilitadoEsError`, `orphansConSourceSheetDesconocidaEsError`, `orphansConColumnaMesInexistenteEsError`, `orphansCompletoYValidoNoLevantaErrores`.
+- Fixtures (`gen_fixtures.py`) ampliados con cuatro imputaciones huérfanas en `Cierre` que cubren tres casos: CN inexistente con matrícula `"-"` (2 imputaciones que suman 8h), CN inexistente con matrícula que sí existe en Extracción pero asociada a otra petición (`VACACIONES/90014/3h`), y CN existente con matrícula no asociada a esa petición (`P-001/MAT-HUERFANO/1h`).
+
+### Diseño
+
+- **Opt-in**: el default es `mes.orphans.enabled=false` en el classpath fallback y en el test-config, pero **sí** se activa en el `config.properties` raíz que se distribuye con el proyecto (el que usa el usuario). Este desdoblamiento permite ejecutar los tests existentes con el comportamiento de 1.6.2 (contadores exactos de filas) mientras que el despliegue real recibe la feature activa.
+- **Agrupación por pareja `(CN, Mat)`**, no por CN solo: cada pareja única genera una fila. Esto mantiene la coherencia con `Resumen`, que suma por matrícula (una celda `Matrícula` con CSV no casaría con el `SUMIFS`). El coste es modesto: ~35 filas extra en los datos reales frente a las ~24 que resultarían agrupando solo por CN.
+- **Criterio de huérfano**: un par `(CN, Mat)` es huérfano si `(CN, Mat)` no existe como `(Peticion, Recurso)` en Extracción. Esto cubre dos casos en una sola regla: petición totalmente inexistente, y petición existente con matrícula no asociada. `Funcion` se excluye del criterio porque el export real del usuario trae esa columna vacía en Cierre; el criterio más estricto con `Funcion` generaría huérfanos en exceso.
+- **`"-"` como sentinela**: los huérfanos no tienen `Aplicación`, `Título`, `Estado`, `Departamento` ni `Res. Tecnico`. Se rellenan con `"-"` literal (decisión del usuario). Esto hace que el VLOOKUP de `Equipo` contra `Equipos` devuelva `""` vía `IFERROR`, y obliga a excluir `"-"` de la detección de "apps sin mapeo" para no generar ruido.
+- **Ordenación única global**: en vez de "huérfanos al final con separador", las filas quedan mezcladas con las normales según el criterio numérico-primero. Peticiones numéricas van arriba ordenadas ASC, no numéricas al final ordenadas alfabéticamente. Esto reordena también las filas de Extracción cuando se activa, cosa que el usuario confirmó aceptar.
+
+### Nota de migración
+
+Para activar la feature en un `config.properties` preexistente, añade el bloque completo:
+
+```properties
+mes.orphans.enabled=true
+mes.orphans.sourceSheet=Cierre
+mes.orphans.matchComponent=Component Name
+mes.orphans.matchMatricula=Matricula
+mes.orphans.sumColumn=Hours
+mes.orphans.colPeticion=Petición
+mes.orphans.colMatricula=Matrícula
+mes.orphans.colJira=Jira
+```
+
+Si los nombres `Petición`, `Matrícula`, `Jira` en tu `mes.col.N.name` difieren (por ejemplo si has internacionalizado), ajusta las tres últimas claves en consecuencia. Sin esta sección, el comportamiento es exactamente el de 1.6.2.
+
+### Cambios de versión
+
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.6.2` a `1.7.0`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado.
+
+### Pendiente conocido fuera de alcance
+
+Dos problemas identificados durante esta sesión que quedan **fuera** del alcance acordado de esta 1.7.0 y requieren decisión separada:
+
+**Bug B — `Cierre.Funcion` vacío**: el export real del usuario trae `Cierre.Funcion` vacía en todas las filas, mientras que `Extraccion.Funcion` trae valores (`AN`, `OT`, `PR`, ...). Eso hace que el `SUMIFS` de Jira (que incluye el criterio `Funcion:Funcion`) dé `0` incluso para filas con contrapartida válida. El usuario indicó en la conversación de esta sesión que **lo arregla por su lado** (modificando el export o quitando el criterio `Funcion` del match en su propio config). La feature de huérfanos de este 1.7.0 es complementaria a ese arreglo: una vez restaurado el match de Jira, las filas normales contabilizan sus horas y las filas huérfanas siguen recogiendo el resto.
+
+**Bug C — Resumen: matrícula numérica vs rango textual**: descubierto al escribir los tests de huérfanos. `SummarySheetBuilder.setNumericOrString` escribe las matrículas todo-dígito en la columna clave del Resumen como `NUMERIC` (Excel las alinea a la derecha, más bonito visualmente). Pero la columna `Matrícula` de `Resultado` es `STRING` por efecto del fix 1.6.2 (`asText.columns=Peticion,Recurso`). El `SUMIFS` del Resumen, con criterio numérico y rango textual, no casa — misma asimetría que el fix 1.6.2 intentó corregir al revés. **Consecuencia**: matrículas todo-dígito dan `Jira=0` en Resumen, incluso sin huérfanos. Este bug es preexistente al 1.7.0 (ya afectaba a `55751`, `99642`, `99641` en 1.6.2) pero no se detectó porque los tests existentes del Resumen no evalúan los SUMIFS con `FormulaEvaluator`. Se manifiesta en los inputs reales del usuario en cuanto las matrículas se escriben como texto. **Fix probable** (fuera del alcance 1.7.0): cambiar `setNumericOrString` a siempre-STRING, o llamar a `copyCellValueAsText` de `PoiUtils` reutilizando la infraestructura de 1.6.2. Requiere decisión del usuario porque cambia la apariencia del Resumen (alineación izquierda vs derecha) y puede afectar a su flujo posterior.
+
+## [1.6.2] — Fix del SUMIFS de Jira: mismatch de tipos entre Extracción y Cierre
+
+Patch. La columna **Jira** de `Resultado` (SUMIFS contra `Cierre`) estaba devolviendo `0` para todas las peticiones cuya `Peticion`/`Recurso` en el export de Extracción venía como número mientras el `Component Name`/`Matricula` correspondiente en el export de Cierre venía como texto. Excel trata `55751` (número) y `"55751"` (texto) como valores distintos cuando el criterio del `SUMIFS` es numérico, así que esas imputaciones se perdían sin aviso.
+
+Sobre los inputs reales reportados por el usuario: 55 peticiones y 4 matrículas únicas estaban afectadas (100% de los valores en común entre ambas hojas tenían tipos distintos). **La hoja `Resumen` hereda el fix**, porque suma a partir de `Resultado`: donde antes veía `0`, ahora ve los totales reales.
+
+### Arreglado
+
+- `SUMIFS` de la columna `Jira` de `Resultado` ahora recupera imputaciones donde `Cierre.Component Name` / `Cierre.Matricula` son de tipo distinto a `Extraccion.Peticion` / `Extraccion.Recurso`. Verificado empíricamente: el bug se reproducía con criterio numérico sobre rango textual (asimetría conocida de `SUMIFS`; criterio textual sobre rango numérico sí funcionaba por coerción implícita).
+- `SheetCopier` acepta ahora un set opcional de índices de columna que se copian forzando tipo `STRING` al escribir al workbook resultado, a partir de la primera fila de datos. Cabeceras y filas de metadatos se copian intactas.
+- Nuevo helper `PoiUtils.copyCellValueAsText` con reglas documentadas por tipo: `NUMERIC` entero → sin decimales (`55751`, no `55751.0`); `NUMERIC` decimal → `String.valueOf`; `NUMERIC` con formato de fecha → **no** se fuerza a texto (se delega al comportamiento original, convertir una fecha a epoch Excel como texto sería prácticamente siempre un bug del usuario); `BOOLEAN` → `"true"`/`"false"`; `FORMULA` → fórmula preservada; `BLANK` → blank (no cadena vacía); `ERROR` → código de error.
+
+### Añadido
+
+- Nueva clave de configuración por perfil: `profile.<id>.asText.columns=<cabecera1>,<cabecera2>,...`. Lista CSV de cabeceras cuyo valor se fuerza a `STRING` al copiar la hoja al workbook resultado. Opt-in: sin la clave, el comportamiento del 1.6.0 queda intacto (cambio retrocompatible). En los `config.properties` por defecto se activan ya las cuatro cabeceras que participan en el `SUMIFS` de `Jira`:
+  - `profile.Extraccion.asText.columns=Peticion,Recurso`
+  - `profile.Cierre.asText.columns=Component Name,Matricula`
+- Warning `CABECERA` en runtime si una cabecera listada en `asText.columns` no existe en la hoja detectada; el merge no se interrumpe (se ignora esa columna y se registra el aviso en el `RunReport`, visible en `_Avisos` con `report.inExcel=true`).
+
+### Tests
+
+- `ExcelMergerIntegrationTest` — cinco casos nuevos: tres de regresión (`55751` → `7h`, `101770` → `5h`, `138074` → `9h` con filtrado adicional por `Funcion=Dev`), uno que verifica que `Extraccion.Peticion`/`Recurso` en el workbook resultado quedan como `STRING` tras el fix, y uno que confirma el warning `CABECERA` cuando `asText.columns` menciona una cabecera inexistente.
+- Nuevo `PoiUtilsTest` en el paquete `util` con 9 casos unitarios cubriendo cada rama de `copyCellValueAsText`: numérico entero, decimal, string, `"-"`, boolean, blank, fórmula, error, fecha con formato.
+- Fixtures (`extraccion.xlsx`, `cierre.xlsx`) ampliados vía `gen_fixtures.py`: tres filas nuevas en Extracción con `Peticion`/`Recurso` como `NUMERIC`, cinco imputaciones nuevas en Cierre con `Component Name`/`Matricula` como `STRING` sobre esos mismos valores. Totales esperados documentados en los comentarios del script. Los tests existentes que contaban filas exactas de `Extraccion` y `Resultado` se han actualizado a los nuevos conteos (19 y 18 respectivamente).
+
+### Diseño
+
+- **Por qué `SheetCopier` y no `CopyColumnStrategy`**: el `SUMIFS` que emite `SumIfsColumnStrategy` referencia el rango de criterio contra la hoja `Extraccion` del workbook resultado (no contra `Resultado`). Normalizar en `CopyColumnStrategy` sólo habría cambiado la hoja `Resultado`, que no interviene en el match. El fix debe ocurrir donde se escribe la hoja que el `SUMIFS` va a leer: `SheetCopier`.
+- **Simetría `Extraccion` + `Cierre`**: con normalizar sólo el lado del criterio (Extracción) sería suficiente en la práctica — `SUMIFS` con criterio textual hace coerción sobre rangos numéricos — pero normalizar también Cierre es barato y blinda frente a futuros exports donde alguna de esas columnas vuelva a cambiar de tipo.
+- **Por qué no `SUMPRODUCT`**: la alternativa natural (`SUMPRODUCT((TEXT(rango,"@")=TEXT(critrango,"@"))*valores)`) tolera tipos pero obliga a acotar rangos (no admite `A:A`), penaliza evaluación en workbooks grandes, y requiere reescribir `SumIfsColumnStrategy` por completo. Normalizar en copia es la misma idea expresada en el punto más barato del pipeline.
+- **Casos huérfanos no abordados aquí**: el export de Cierre contiene imputaciones con `Matricula="-"` y `Component Name` no numérico que no tienen contrapartida en Extracción. Con el diseño actual (`Resultado` ancla en `Extraccion.Peticion`) esas horas no tienen fila destino donde sumarse — es un cambio de alcance distinto del fix de tipos y queda fuera de esta patch. El usuario puede detectar esos casos manualmente cruzando `Cierre.Hours` contra `SUM(Resultado.Jira)`.
+
+### Nota de migración
+
+Sólo aplica si partes de un `config.properties` personalizado (no el que se distribuye con el proyecto). Añade las dos claves:
+
+```properties
+profile.Extraccion.asText.columns=Peticion,Recurso
+profile.Cierre.asText.columns=Component Name,Matricula
+```
+
+Sin esas claves, el comportamiento del 1.6.0 queda exactamente como estaba: las columnas se copian preservando su tipo original y el bug sigue presente para exports con mismatch de tipos. El merge no se rompe; lo que no se activa es el fix.
+
+El `config.properties` que viene con el proyecto (raíz y classpath fallback) ya incluye las claves con los valores por defecto.
+
+### Cambios de versión
+
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.6.0` a `1.6.2`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado en consecuencia.
+- La versión `1.6.1` quedó sin publicar (bump intermedio descartado durante la elaboración del fix).
+
 ## [1.6.0] — Hoja resumen + tintado de columnas
 
 Minor que añade la hoja **Resumen** al libro de salida (sumatorio por matrícula sobre las columnas de horas de `Resultado`) e introduce dos atributos configurables nuevos por columna de `Resultado`: `mes.col.N.fill` y `mes.col.N.redIfNotEqualTo`. Se simplifica `Resultado` eliminando las columnas `Desfase` y `Dif Mes` (que habían quedado como placeholders sin relleno real en el flujo actual).

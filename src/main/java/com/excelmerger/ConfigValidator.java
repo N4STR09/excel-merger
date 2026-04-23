@@ -73,6 +73,7 @@ public class ConfigValidator {
         validateMes(knownSheets);
         validateDerived(knownSheets);
         validateSummary(knownSheets);
+        validateOrphans(knownSheets);
 
         return Collections.unmodifiableList(new ArrayList<>(errors));
     }
@@ -419,6 +420,65 @@ public class ConfigValidator {
         Integer maxRow = parsePositiveInt("summary.sumifsMaxRow", 10000);
         if (maxRow != null && maxRow < 1) {
             errors.add("summary.sumifsMaxRow debe ser >= 1 (actual: " + maxRow + ").");
+        }
+    }
+
+    /**
+     * Valida las claves de {@code mes.orphans.*} (v1.7.0). Solo se activa si
+     * {@code mes.orphans.enabled=true}. Comprueba:
+     * <ul>
+     *   <li>La hoja declarada en {@code mes.orphans.sourceSheet} existe.</li>
+     *   <li>Los nombres de columna MES ({@code colPeticion}, {@code colMatricula},
+     *       {@code colJira}) referencian columnas definidas en {@code mes.col.N.name}.</li>
+     *   <li>{@code mes.enabled=true} (no tiene sentido si MES esta apagada).</li>
+     * </ul>
+     * Las claves {@code matchComponent}, {@code matchMatricula}, {@code sumColumn}
+     * no se validan aqui porque dependen del contenido del Excel en runtime;
+     * el builder emite warnings si no las encuentra.
+     */
+    private void validateOrphans(Set<String> knownSheets) {
+        if (!config.getBoolean("mes.orphans.enabled", false)) {
+            return;
+        }
+        if (!config.getBoolean("mes.enabled", false)) {
+            errors.add("mes.orphans.enabled=true pero mes.enabled=false; "
+                    + "los huerfanos solo se emiten dentro de la hoja MES.");
+            return;
+        }
+
+        String sourceSheet = config.get("mes.orphans.sourceSheet", "");
+        if (isBlank(sourceSheet)) {
+            errors.add("mes.orphans.sourceSheet: valor requerido cuando mes.orphans.enabled=true.");
+        } else if (!knownSheets.contains(sourceSheet)) {
+            errors.add("mes.orphans.sourceSheet: referencia a hoja desconocida '"
+                    + sourceSheet + "'. Hojas conocidas: " + knownSheets + ".");
+        }
+
+        // Recolectar los nombres de columna MES para validar las claves col*
+        Set<String> mesColNames = new LinkedHashSet<>();
+        int i = 1;
+        while (true) {
+            String name = config.get("mes.col." + i + ".name", null);
+            if (name == null || name.trim().isEmpty()) break;
+            mesColNames.add(name.trim());
+            i++;
+        }
+
+        String[][] colsToCheck = {
+                {"mes.orphans.colPeticion",  "Petición"},
+                {"mes.orphans.colMatricula", "Matrícula"},
+                {"mes.orphans.colJira",      "Jira"},
+        };
+        for (String[] pair : colsToCheck) {
+            String key = pair[0];
+            String defaultVal = pair[1];
+            String value = config.get(key, defaultVal);
+            if (isBlank(value)) {
+                errors.add(key + ": valor requerido cuando mes.orphans.enabled=true.");
+            } else if (!mesColNames.contains(value)) {
+                errors.add(key + ": '" + value + "' no coincide con ningun mes.col.N.name. "
+                        + "Columnas MES definidas: " + mesColNames + ".");
+            }
         }
     }
 

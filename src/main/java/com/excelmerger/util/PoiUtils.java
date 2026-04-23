@@ -80,6 +80,65 @@ public final class PoiUtils {
     }
 
     /**
+     * Copia el valor de una celda origen en la destino <b>forzando tipo STRING</b>.
+     *
+     * <p>Caso de uso: normalizar columnas que actuan como clave en un
+     * {@code SUMIFS} para evitar el mismatch silencioso entre numericos y
+     * textuales (p. ej. {@code 55751} en Extraccion vs {@code "55751"} en
+     * Cierre, que Excel trata como valores distintos cuando el criterio es
+     * numerico).</p>
+     *
+     * <p>Reglas por tipo de la celda origen:</p>
+     * <ul>
+     *   <li>STRING: se copia tal cual.</li>
+     *   <li>NUMERIC no-fecha: se serializa sin decimales si es entero.
+     *       {@code 55751.0} -> {@code "55751"}, {@code 3.14} -> {@code "3.14"}.</li>
+     *   <li>NUMERIC con formato de fecha: NO se fuerza a texto; se copia como
+     *       fecha (delegando en {@link #copyCellValue}). Convertir una fecha
+     *       a su epoch Excel como texto ({@code "45756"}) seria practicamente
+     *       siempre un bug del usuario en el config.</li>
+     *   <li>BOOLEAN: {@code "true"} / {@code "false"}.</li>
+     *   <li>FORMULA: se copia la formula tal cual (no se evalua; POI
+     *       reescribira el cache si el workbook se recalcula al guardar).</li>
+     *   <li>BLANK: celda destino queda blank (no se escribe cadena vacia).</li>
+     *   <li>ERROR: se copia como ERROR, misma semantica que {@link #copyCellValue}.</li>
+     * </ul>
+     */
+    public static void copyCellValueAsText(Cell source, Cell target) {
+        switch (source.getCellType()) {
+            case STRING:
+                target.setCellValue(source.getStringCellValue());
+                break;
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(source)) {
+                    // Fechas: no forzar a texto (ver javadoc).
+                    target.setCellValue(source.getDateCellValue());
+                } else {
+                    double d = source.getNumericCellValue();
+                    String asText = (d == (long) d)
+                            ? String.valueOf((long) d)
+                            : String.valueOf(d);
+                    target.setCellValue(asText);
+                }
+                break;
+            case BOOLEAN:
+                target.setCellValue(String.valueOf(source.getBooleanCellValue()));
+                break;
+            case FORMULA:
+                target.setCellFormula(source.getCellFormula());
+                break;
+            case BLANK:
+                target.setBlank();
+                break;
+            case ERROR:
+                target.setCellErrorValue(source.getErrorCellValue());
+                break;
+            default:
+                target.setCellValue(source.toString());
+        }
+    }
+
+    /**
      * {@code true} si la celda es {@code null}, de tipo BLANK, o una cadena
      * que solo contiene espacios.
      */

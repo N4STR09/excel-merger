@@ -1,5 +1,7 @@
 package com.excelmerger;
 
+import com.excelmerger.util.PoiUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,10 +103,12 @@ public class FileProfileResolver {
         final List<String> expectedHeaders;
         final int minMatches;
         final Map<String, String> expectedCellValues;  // ref -> valor esperado
+        final List<String> asTextColumns;              // cabeceras a forzar a STRING
 
         private FileProfile(String id, String sheetName, int sheetIndex,
                             int headerRow, List<String> expectedHeaders, int minMatches,
-                            Map<String, String> expectedCellValues) {
+                            Map<String, String> expectedCellValues,
+                            List<String> asTextColumns) {
             this.id = id;
             this.sheetName = sheetName;
             this.sheetIndex = sheetIndex;
@@ -111,6 +116,7 @@ public class FileProfileResolver {
             this.expectedHeaders = expectedHeaders;
             this.minMatches = minMatches;
             this.expectedCellValues = expectedCellValues;
+            this.asTextColumns = asTextColumns;
         }
 
         static FileProfile fromConfig(ConfigLoader config, String id) {
@@ -142,8 +148,18 @@ public class FileProfileResolver {
                 }
             }
 
+            // v1.6.2: columnas cuyo valor se fuerza a texto al copiar al
+            // workbook resultado. Opt-in, vacio por defecto.
+            String asTextRaw = config.get(prefix + "asText.columns", "").trim();
+            List<String> asText = asTextRaw.isEmpty()
+                    ? Collections.emptyList()
+                    : Arrays.stream(asTextRaw.split(","))
+                            .map(String::trim)
+                            .filter(s -> !s.isEmpty())
+                            .collect(Collectors.toList());
+
             return new FileProfile(id, sheetName, sheetIndex, headerRow,
-                    headers, minMatches, cellValues);
+                    headers, minMatches, cellValues, asText);
         }
 
         /**
@@ -233,6 +249,46 @@ public class FileProfileResolver {
 
         public String getId() { return id; }
         public String getSheetName() { return sheetName; }
+
+        /**
+         * Cabeceras cuyo valor se copia como STRING al workbook resultado
+         * (clave {@code profile.<id>.asText.columns}). Vacio si no se definio.
+         */
+        public List<String> getAsTextColumns() {
+            return Collections.unmodifiableList(asTextColumns);
+        }
+
+        /**
+         * Fila (1-indexada) donde estan las cabeceras en la hoja de origen
+         * del perfil. Util para que {@code SheetCopier} sepa a partir de que
+         * fila se aplican las columnas {@code asText}.
+         */
+        public int getHeaderRow() { return headerRow; }
+
+        /**
+         * Indices 0-based de las columnas que, segun {@link #getAsTextColumns()},
+         * se deben copiar como STRING en la hoja {@code sheet}. Las cabeceras
+         * se buscan case-insensitive contra la fila {@link #getHeaderRow()}.
+         * Cabeceras no encontradas se ignoran silenciosamente (el cliente,
+         * {@code ConfigValidator}, emite el warning correspondiente).
+         */
+        public Set<Integer> resolveAsTextColumnIndexes(Sheet sheet) {
+            if (asTextColumns.isEmpty() || sheet == null) {
+                return Collections.emptySet();
+            }
+            Row header = sheet.getRow(headerRow - 1);
+            if (header == null) {
+                return Collections.emptySet();
+            }
+            Set<Integer> indexes = new HashSet<>();
+            for (String col : asTextColumns) {
+                int idx = PoiUtils.findColumnIndex(header, col);
+                if (idx >= 0) {
+                    indexes.add(idx);
+                }
+            }
+            return indexes;
+        }
     }
 
     /** Info de diagnostico del intento de deteccion. */

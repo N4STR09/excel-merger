@@ -10,9 +10,13 @@ versionan en src/test/resources/fixtures/ junto con los tests.
 Uso (desde la raiz del proyecto):
     pip install openpyxl --break-system-packages
     python3 gen_fixtures.py
+
+v1.6.2: se incorporan 3 filas de regresion para verificar que el SUMIFS
+tolera mismatch de tipo numero/texto entre Extraccion y Cierre.
 """
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import WriteOnlyCell  # noqa: F401  (util potencial)
 
 OUT_DIR = "src/test/resources/fixtures"
 
@@ -21,7 +25,8 @@ OUT_DIR = "src/test/resources/fixtures"
 # =========================================================================
 # Perfil Extraccion (config.properties): cabeceras en fila 1. Debe tener
 # al menos 4 cabeceras de las del profile para que se detecte.
-# 14 filas con Peticion + 1 con Peticion vacia (skip por ancla).
+# 14 filas "historicas" (todas texto) + 3 filas de regresion v1.6.2
+# (Peticion/Recurso como NUMERIC) + 1 skip = 18 filas utiles + 1 header.
 EXTRACCION_HEADERS = [
     "Peticion", "Titulo", "Aplicaci_Activi", "Estado", "Usuario_Resp_Tecnico",
     "Horas_AutoriTotPeticion", "Horas_RealizadoTot", "Estado_Distribucion",
@@ -36,7 +41,7 @@ def build_extraccion():
     ws.title = "Extraccion"
     ws.append(EXTRACCION_HEADERS)
 
-    # 14 filas validas
+    # 14 filas validas (texto en Peticion y Recurso)
     rows = [
         ["P-001", "Migracion BBDD",          "DF", "Abierta",  "tresp1@x", 40, 12, "OK", "P1", "Obj A", "CTR-100", "M-1001", "Dev",    10, 5,  40, 20],
         ["P-002", "Refactor UI",             "HE", "Abierta",  "tresp1@x", 60, 30, "OK", "P1", "Obj B", "CTR-100", "M-1002", "Dev",    20, 15, 60, 35],
@@ -56,19 +61,41 @@ def build_extraccion():
     for r in rows:
         ws.append(r)
 
-    # Fila 16: Peticion vacia → debe ser saltada por MesSheetBuilder (ancla vacia)
+    # Filas de regresion v1.6.2 — mismatch de tipos numerico/textual.
+    # Peticion y Recurso vienen como NUMERIC aqui, tal y como llegan en
+    # el export real del usuario. openpyxl los serializa como numeric.
+    # En Cierre, las imputaciones para estas peticiones/matriculas vienen
+    # como STRING. Sin el fix v1.6.2, el SUMIFS daria 0 para las tres.
+    regression_rows = [
+        # Peticion=55751 (num), Recurso=99642 (num). En Cierre habra una
+        # imputacion con Component Name="55751" (str), Matricula="99642"
+        # (str), Funcion="Dev", Hours=7. Esperado tras fix: Jira=7.
+        [55751, "Regresion num-num", "DF", "Abierta",  "tresp1@x", 50, 7, "OK", "P1", "Obj", "CTR-100", 99642, "Dev", 25, 7, 50, 7],
+        # Peticion=101770 (num), Recurso=90014 (num). Dos imputaciones en
+        # Cierre (3 + 2 = 5). Esperado tras fix: Jira=5.
+        [101770, "Regresion num dobles", "EW", "Abierta",  "tresp2@x", 40, 5, "OK", "P2", "Obj", "CTR-200", 90014, "Dev", 20, 5, 40, 5],
+        # Peticion=138074 (num), Recurso=99641 (num). Una imputacion de 9h
+        # + una de 4h con Funcion=Sup (filtrada por el tercer criterio).
+        # Esperado tras fix: Jira=9 (solo la Dev).
+        [138074, "Regresion num filtrada Sup", "HE", "Abierta",  "tresp1@x", 30, 9, "OK", "P1", "Obj", "CTR-100", 99641, "Dev", 15, 9, 30, 9],
+    ]
+    for r in regression_rows:
+        ws.append(r)
+
+    # Ultima fila: Peticion vacia → debe ser saltada por MesSheetBuilder (ancla vacia)
     skip_row = [""] + ["-"] * (len(EXTRACCION_HEADERS) - 1)
     ws.append(skip_row)
 
     wb.save(f"{OUT_DIR}/extraccion.xlsx")
-    print("Generated extraccion.xlsx: 1 header row + 14 data rows + 1 skip row (Peticion vacia)")
+    print("Generated extraccion.xlsx: 1 header + 14 data + 3 regression v1.6.2 + 1 skip = 19 filas")
 
 
 # =========================================================================
 # cierre.xlsx
 # =========================================================================
 # Perfil Cierre (config.properties): cabeceras en fila 2 (la 1 es titulo).
-# 16 imputaciones con totales conocidos que los SUMIFS puedan cruzar.
+# 16 imputaciones historicas + 4 imputaciones de regresion v1.6.2 para
+# cruzar con las filas numericas anadidas a Extraccion.
 CIERRE_HEADERS = [
     "Project Key", "Issue Key", "Aplicación BFA", "Labels",
     "Parent Issue Summary", "Summary", "Description", "Issue Type",
@@ -86,10 +113,8 @@ def build_cierre():
     # Fila 2: cabeceras
     ws.append(CIERRE_HEADERS)
 
-    # 16 filas de imputaciones. Totales conocidos tras añadir la condición Funcion
-    # (SUMIFS con match Component Name:Peticion, Matricula:Recurso, Funcion:Funcion):
-    # Todas las filas de Extraccion tienen Funcion="Dev", asi que solo suman las
-    # imputaciones de Cierre con Funcion="Dev". Las "Sup" quedan filtradas.
+    # 16 filas historicas (texto en todas las columnas). Totales conocidos
+    # (Funcion=Dev):
     #   P-001 + M-1001 + Dev -> PROJ-1 (3) + PROJ-2 (2) = 5 horas   (PROJ-3 con Sup queda fuera)
     #   P-002 + M-1002 + Dev -> PROJ-4 (5) = 5 horas
     #   P-003 + M-1003 + Dev -> PROJ-5 (10) + PROJ-6 (5) = 15 horas
@@ -114,8 +139,40 @@ def build_cierre():
     for r in rows:
         ws.append(r)
 
+    # Filas de regresion v1.6.2 — Component Name y Matricula como STRING,
+    # cruzan con peticiones/recursos NUMERIC en Extraccion:
+    #   55751  + 99642 + Dev -> PROJ-20 (7) = 7
+    #   101770 + 90014 + Dev -> PROJ-21 (3) + PROJ-22 (2) = 5
+    #   138074 + 99641 + Dev -> PROJ-23 (9) = 9   (PROJ-24 con Sup excluido)
+    regression_rows = [
+        ["PROJ", "PROJ-20", "DF", "reg",  "epic-r1", "sumR1", "desc", "Task", "u1", "2026-02-01", "55751",  "tR1", "99642", "Dev", "accR", 7],
+        ["PROJ", "PROJ-21", "EW", "reg",  "epic-r2", "sumR2", "desc", "Task", "u2", "2026-02-02", "101770", "tR2", "90014", "Dev", "accR", 3],
+        ["PROJ", "PROJ-22", "EW", "reg",  "epic-r2", "sumR3", "desc", "Task", "u2", "2026-02-03", "101770", "tR3", "90014", "Dev", "accR", 2],
+        ["PROJ", "PROJ-23", "HE", "reg",  "epic-r3", "sumR4", "desc", "Task", "u3", "2026-02-04", "138074", "tR4", "99641", "Dev", "accR", 9],
+        ["PROJ", "PROJ-24", "HE", "reg",  "epic-r3", "sumR5", "desc", "Task", "u3", "2026-02-05", "138074", "tR5", "99641", "Sup", "accR", 4],
+    ]
+    for r in regression_rows:
+        ws.append(r)
+
+    # Filas huerfanas v1.7.0 — imputaciones cuya (Component Name, Matricula)
+    # NO casa con ninguna (Peticion, Recurso) de Extraccion. Se usan para
+    # verificar que el builder las incluye en Resultado como filas
+    # adicionales (opt-in mes.orphans.enabled=true).
+    # Totales esperados por pareja (CN, Mat):
+    #   (TICKETS, -)            -> 2 imputaciones x 4h = 8h
+    #   (VACACIONES, 90014)     -> 3h   (90014 existe en Extraccion pero asociado a 101770, no a VACACIONES)
+    #   (P-001, MAT-HUERFANO)   -> 1h   (P-001 existe en Extraccion pero solo con M-1001; MAT-HUERFANO no esta asociado)
+    orphan_rows = [
+        ["PROJ", "PROJ-30", "PF", "huerf", "epic-h1", "sumH1", "desc", "Task", "u4", "2026-02-10", "TICKETS",      "tH1", "-",             "Dev", "accH", 4],
+        ["PROJ", "PROJ-31", "PF", "huerf", "epic-h1", "sumH2", "desc", "Task", "u4", "2026-02-11", "TICKETS",      "tH2", "-",             "Dev", "accH", 4],
+        ["PROJ", "PROJ-32", "EW", "huerf", "epic-h2", "sumH3", "desc", "Task", "u5", "2026-02-12", "VACACIONES",   "tH3", "90014",         "Dev", "accH", 3],
+        ["PROJ", "PROJ-33", "DF", "huerf", "epic-h3", "sumH4", "desc", "Task", "u1", "2026-02-13", "P-001",        "tH4", "MAT-HUERFANO",  "Dev", "accH", 1],
+    ]
+    for r in orphan_rows:
+        ws.append(r)
+
     wb.save(f"{OUT_DIR}/cierre.xlsx")
-    print("Generated cierre.xlsx: 1 metadata row + 1 header row + 16 imputation rows")
+    print("Generated cierre.xlsx: 1 meta + 1 header + 16 historical + 5 regression v1.6.2 + 4 orphan v1.7.0 = 27 filas")
 
 
 if __name__ == "__main__":
