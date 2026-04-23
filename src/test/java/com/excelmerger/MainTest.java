@@ -61,6 +61,11 @@ class MainTest {
         //        mismatch numerico/textual entre Extraccion y Cierre.
         // 1.7.0: filas huerfanas en Resultado (imputaciones de Cierre sin
         //        contrapartida en Extraccion). Opt-in via mes.orphans.enabled.
-        assertThat(Main.APP_VERSION).isEqualTo("1.7.0");
+        // 1.7.1: fix del bug C. SummarySheetBuilder escribe matriculas como
+        //        STRING siempre; antes las todo-digito eran NUMERIC y el
+        //        SUMIFS no casaba contra la columna Matricula de Resultado
+        //        (que es STRING tras el fix 1.6.2), dando Jira=0 para todas
+        //        las matriculas numericas en Resumen.
+        assertThat(Main.APP_VERSION).isEqualTo("1.7.1");
     }
 }

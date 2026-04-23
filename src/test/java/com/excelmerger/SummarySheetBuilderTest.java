@@ -1,6 +1,9 @@
 package com.excelmerger;
 
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.CellValue;
+import org.apache.poi.ss.usermodel.FormulaEvaluator;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -200,9 +203,16 @@ class SummarySheetBuilderTest {
             new SummarySheetBuilder(cfg, report).build(wb);
 
             Sheet resumen = wb.getSheet("Resumen");
-            // Fila 4..7 (idx 3..6): 99641, 99642, -, Sin Matricula
-            assertThat((long) resumen.getRow(3).getCell(0).getNumericCellValue()).isEqualTo(99641L);
-            assertThat((long) resumen.getRow(4).getCell(0).getNumericCellValue()).isEqualTo(99642L);
+            // Fila 4..7 (idx 3..6): 99641, 99642, -, Sin Matricula.
+            //
+            // v1.7.1: todas las matriculas se escriben como STRING (antes
+            // las todo-digito se escribian como NUMERIC). El orden sigue
+            // siendo el mismo: numericas ordenadas ascendente primero,
+            // luego no numericas alfabetico. Lo que cambia es el tipo de
+            // celda, necesario para que el SUMIFS case contra la columna
+            // Matricula de Resultado (que es STRING por el fix 1.6.2).
+            assertThat(resumen.getRow(3).getCell(0).getStringCellValue()).isEqualTo("99641");
+            assertThat(resumen.getRow(4).getCell(0).getStringCellValue()).isEqualTo("99642");
             assertThat(resumen.getRow(5).getCell(0).getStringCellValue()).isEqualTo("-");
             assertThat(resumen.getRow(6).getCell(0).getStringCellValue()).isEqualTo("Sin Matricula");
         }
@@ -256,6 +266,40 @@ class SummarySheetBuilderTest {
         try (Workbook wb = buildResultadoWorkbook()) {
             new SummarySheetBuilder(cfg, report).build(wb);
             assertThat(report.sheets()).containsKey("Resumen");
+        }
+    }
+
+    @Test
+    void sumifsDeMatriculaNumericaEvaluaCorrectamenteContraResultado() throws Exception {
+        // Regresion v1.7.1 (bug C): antes del fix, las matriculas todo-digito
+        // se escribian como NUMERIC en la columna clave del Resumen, mientras
+        // que la columna Matricula de Resultado es STRING (por el fix 1.6.2).
+        // El SUMIFS con criterio NUMERIC contra rango STRING no casa en Excel,
+        // por lo que el total de Jira para una matricula numerica salia 0.
+        //
+        // Tras el fix, la celda clave es STRING y el SUMIFS suma correctamente.
+        // En el workbook de test, la matricula 99641 aparece en las filas
+        // P-001 (Jira=5) y P-003 (Jira=2), total esperado = 7.
+        ConfigLoader cfg = TestFixtures.configFromProperties(baseConfig());
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildResultadoWorkbook()) {
+            new SummarySheetBuilder(cfg, report).build(wb);
+
+            Sheet resumen = wb.getSheet("Resumen");
+            // Fila 4 (idx 3): 99641. Verificamos tipo STRING y suma de Jira.
+            Cell matrCell = resumen.getRow(3).getCell(0);
+            assertThat(matrCell.getCellType())
+                    .as("Celda clave de Resumen debe ser STRING para que el SUMIFS case")
+                    .isEqualTo(CellType.STRING);
+            assertThat(matrCell.getStringCellValue()).isEqualTo("99641");
+
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+            CellValue jiraTotal = evaluator.evaluate(resumen.getRow(3).getCell(1));
+            assertThat(jiraTotal.getNumberValue())
+                    .as("SUMIFS para matricula 99641 debe sumar 5 + 2 = 7 "
+                            + "(regresion del bug C: NUMERIC vs STRING daba 0)")
+                    .isEqualTo(7.0);
         }
     }
 }

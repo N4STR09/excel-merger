@@ -496,21 +496,7 @@ class ExcelMergerIntegrationTest {
     @Test
     void orphansEnabledHuerfanoAparecEnResultadoConSuMatricula(@TempDir Path tmp) throws IOException {
         // Verifica que la fila huerfana VACACIONES/90014/3h aparece en
-        // Resultado con la matricula correcta, lista para que Resumen
-        // la sume por matricula.
-        //
-        // NOTA (v1.7.0): este test *no* evalua el total en Resumen a
-        // proposito. Hay un bug latente descubierto al escribir esta
-        // feature: SummarySheetBuilder escribe las matriculas todo-digito
-        // como NUMERIC en la columna clave, mientras que las celdas
-        // Matricula de Resultado son STRING (por el fix 1.6.2 asText).
-        // El SUMIFS de Resumen con criterio NUMERIC contra rango STRING
-        // no casa en Excel, por lo que las matriculas numericas suman 0
-        // en Resumen incluso sin huerfanos. Este bug es preexistente al
-        // 1.7.0 (ya se daba con 55751/99642/etc. en 1.6.2) pero solo se
-        // hace visible al evaluar la formula con FormulaEvaluator, cosa
-        // que los tests existentes no hacen. Se documenta en CHANGELOG
-        // 1.7.0 como "pendiente conocido, bug C".
+        // Resultado con la matricula correcta y sus horas.
         ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
 
@@ -532,6 +518,44 @@ class ExcelMergerIntegrationTest {
                 return;
             }
             throw new AssertionError("No se encontro fila VACACIONES en Resultado");
+        }
+    }
+
+    @Test
+    void orphansEnabledSumaEnResumenPorMatricula(@TempDir Path tmp) throws IOException {
+        // End-to-end del principio "no perder ni un dato": las horas
+        // huerfanas deben sumar en Resumen. La matricula 90014 aparece
+        // en una fila normal (101770/90014/5h) y en una huerfana
+        // (VACACIONES/90014/3h). Su total Jira en Resumen debe ser 8h.
+        //
+        // Tras el fix 1.7.1 del bug C (SummarySheetBuilder escribe todas
+        // las matriculas como STRING), el SUMIFS casa correctamente
+        // contra la columna Matricula de Resultado, que es STRING por
+        // el fix 1.6.2.
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resumen = wb.getSheet("Resumen");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+            // Buscar la fila con matricula 90014 y evaluar su Jira
+            for (int r = 3; r <= resumen.getLastRowNum(); r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                org.apache.poi.ss.usermodel.Cell matCell = row.getCell(0);
+                if (matCell == null) continue;
+                if (matCell.getCellType() != org.apache.poi.ss.usermodel.CellType.STRING) continue;
+                if (!"90014".equals(matCell.getStringCellValue())) continue;
+                CellValue jiraTotal = evaluator.evaluate(row.getCell(1));
+                assertThat(jiraTotal.getNumberValue())
+                        .as("90014 debe sumar 5h (fila normal 101770) + 3h (huerfano VACACIONES) = 8h")
+                        .isEqualTo(8.0);
+                return;
+            }
+            throw new AssertionError("No se encontro fila 90014 en Resumen");
         }
     }
 

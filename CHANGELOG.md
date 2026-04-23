@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.7.1] — Fix bug C: matrículas numéricas en Resumen daban Jira=0
+
+Patch. Arregla un bug latente descubierto al escribir los tests de la feature 1.7.0 (huérfanos): el `SUMIFS` del `Resumen` daba `0` para cualquier matrícula todo-dígito (`55751`, `90014`, `99641`, `99642`, etc.), aunque esa matrícula tuviera horas asignadas en `Resultado`. El bug es **preexistente a 1.7.0** — afectaba ya en 1.6.2 y antes — pero no lo cazaba ningún test porque los tests existentes del `Resumen` no evaluaban los SUMIFS con `FormulaEvaluator`. Al añadir esa evaluación en los tests de huérfanos salió a la luz.
+
+### Causa raíz
+
+Mismatch de tipos entre la celda clave del `Resumen` y el rango que escanea el SUMIFS:
+
+- `SummarySheetBuilder.setNumericOrString` escribía las matrículas todo-dígito como `NUMERIC` (Excel las alineaba a la derecha, más limpio visualmente).
+- La columna `Matrícula` de `Resultado` es `STRING` tras el fix 1.6.2 (`asText.columns=Recurso`).
+- Excel `SUMIFS` con criterio `NUMERIC` contra rango `STRING` no casa (misma asimetría que arregló 1.6.2, pero en sentido inverso).
+
+El efecto en producción es que cualquier matrícula con código numérico produce `Jira=0`, `REAL=0`, `PDCL=0`, `PDCL + Deuda=0` en `Resumen`, aunque esa persona sí tenga horas imputadas correctamente en `Resultado`.
+
+### Cambiado
+
+- `SummarySheetBuilder.setNumericOrString` escribe ahora **siempre** como `STRING`. La celda clave del `Resumen` queda alineada a la izquierda (consecuencia estética aceptable). El método `isNumeric` se conserva porque `discoverMatriculas` sigue usándolo para ordenar (numéricas ASC primero, alfabéticas al final), pero ya no decide el tipo de celda.
+
+### Tests
+
+- `SummarySheetBuilderTest.matriculasSeDescubrenOrdenandoNumericasPrimeroYStringsDespues` — actualizado al nuevo contrato: todas las matrículas son `STRING`. El orden (numéricas ASC primero, alfabéticas al final) se preserva.
+- `SummarySheetBuilderTest.sumifsDeMatriculaNumericaEvaluaCorrectamenteContraResultado` — nuevo test de regresión del bug C. Evalúa con `FormulaEvaluator` que la matrícula `99641` suma `5 + 2 = 7` (sus dos filas en el workbook de test).
+- `ExcelMergerIntegrationTest.orphansEnabledSumaEnResumenPorMatricula` — restaurado a su versión end-to-end. Verifica que `Resumen` suma `5h` (normal `101770/90014`) + `3h` (huérfano `VACACIONES/90014`) = `8h` para la matrícula numérica `90014`. En 1.7.0 se había rebajado (`orphansEnabledHuerfanoAparecEnResultadoConSuMatricula`) para esquivar el bug C; ahora conviven ambos tests — el primero verifica que el huérfano existe en `Resultado`, el segundo verifica el end-to-end hasta `Resumen`.
+
+### Cambios de versión
+
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.7.0` a `1.7.1`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado.
+
 ## [1.7.0] — Filas huérfanas en Resultado
 
 Minor opt-in. `Resultado` puede ahora incluir **filas adicionales** para las imputaciones de `Cierre` que no tienen contrapartida `(Peticion, Recurso)` en `Extracción`. Sobre los inputs reales del usuario esto son ~35 imputaciones con ~988 horas que el 1.6.2 dejaba fuera (el `SUMIFS` de Jira no las recogía porque no había fila destino para ellas). Con `mes.orphans.enabled=true` esas imputaciones pasan a aparecer como filas huérfanas en `Resultado`, con la matrícula correspondiente, las horas totales agrupadas por par `(Component Name, Matrícula)`, y fórmulas `REAL`/`PDCL`/`PDCL + Deuda` calculadas con la misma cascada `*1.2`. `Resumen` suma estas filas automáticamente por matrícula.
@@ -70,11 +98,9 @@ Si los nombres `Petición`, `Matrícula`, `Jira` en tu `mes.col.N.name` difieren
 
 ### Pendiente conocido fuera de alcance
 
-Dos problemas identificados durante esta sesión que quedan **fuera** del alcance acordado de esta 1.7.0 y requieren decisión separada:
-
 **Bug B — `Cierre.Funcion` vacío**: el export real del usuario trae `Cierre.Funcion` vacía en todas las filas, mientras que `Extraccion.Funcion` trae valores (`AN`, `OT`, `PR`, ...). Eso hace que el `SUMIFS` de Jira (que incluye el criterio `Funcion:Funcion`) dé `0` incluso para filas con contrapartida válida. El usuario indicó en la conversación de esta sesión que **lo arregla por su lado** (modificando el export o quitando el criterio `Funcion` del match en su propio config). La feature de huérfanos de este 1.7.0 es complementaria a ese arreglo: una vez restaurado el match de Jira, las filas normales contabilizan sus horas y las filas huérfanas siguen recogiendo el resto.
 
-**Bug C — Resumen: matrícula numérica vs rango textual**: descubierto al escribir los tests de huérfanos. `SummarySheetBuilder.setNumericOrString` escribe las matrículas todo-dígito en la columna clave del Resumen como `NUMERIC` (Excel las alinea a la derecha, más bonito visualmente). Pero la columna `Matrícula` de `Resultado` es `STRING` por efecto del fix 1.6.2 (`asText.columns=Peticion,Recurso`). El `SUMIFS` del Resumen, con criterio numérico y rango textual, no casa — misma asimetría que el fix 1.6.2 intentó corregir al revés. **Consecuencia**: matrículas todo-dígito dan `Jira=0` en Resumen, incluso sin huérfanos. Este bug es preexistente al 1.7.0 (ya afectaba a `55751`, `99642`, `99641` en 1.6.2) pero no se detectó porque los tests existentes del Resumen no evalúan los SUMIFS con `FormulaEvaluator`. Se manifiesta en los inputs reales del usuario en cuanto las matrículas se escriben como texto. **Fix probable** (fuera del alcance 1.7.0): cambiar `setNumericOrString` a siempre-STRING, o llamar a `copyCellValueAsText` de `PoiUtils` reutilizando la infraestructura de 1.6.2. Requiere decisión del usuario porque cambia la apariencia del Resumen (alineación izquierda vs derecha) y puede afectar a su flujo posterior.
+*Nota: durante la implementación de 1.7.0 se descubrió un segundo bug (C) en `SummarySheetBuilder` que daba `0` para matrículas numéricas en `Resumen`. Se documentó aquí como pendiente y se arregló en la versión siguiente 1.7.1 — ver entrada correspondiente al inicio del changelog.*
 
 ## [1.6.2] — Fix del SUMIFS de Jira: mismatch de tipos entre Extracción y Cierre
 

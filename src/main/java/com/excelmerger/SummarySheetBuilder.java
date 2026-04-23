@@ -325,16 +325,21 @@ public class SummarySheetBuilder {
         return true;
     }
 
+    /**
+     * Escribe el valor de una matrícula en la celda clave de Resumen.
+     *
+     * <p>Contrato crítico: <b>siempre</b> se escribe como STRING. Motivo
+     * (v1.7.1): el SUMIFS que cada fila de valor lanza contra Resultado
+     * compara esta celda clave contra la columna Matrícula de Resultado,
+     * que tras el fix 1.6.2 ({@code asText.columns=Recurso}) es siempre
+     * STRING. Si escribiéramos las matrículas todo-dígito como NUMERIC
+     * (que era el comportamiento hasta 1.7.0 por estética — Excel las
+     * alinea a la derecha), el SUMIFS compararía NUMERIC contra STRING
+     * y daría 0 para todas las matrículas numéricas, mismo sintoma que
+     * corrigió 1.6.2 pero en sentido inverso.</p>
+     */
     private static void setNumericOrString(Cell cell, String value) {
-        if (value == null) {
-            cell.setCellValue("");
-            return;
-        }
-        if (isNumeric(value)) {
-            cell.setCellValue(Long.parseLong(value));
-        } else {
-            cell.setCellValue(value);
-        }
+        cell.setCellValue(value == null ? "" : value);
     }
 
     private static List<String> parseCsv(String raw) {
