@@ -173,14 +173,19 @@ public class ExcelMerger {
             // 5e. Hojas derivadas (formulas / agregaciones)
             new DerivedSheetBuilder(config, report).buildAll(result);
 
-            // 5f. Hoja de avisos (opt-in con report.inExcel=true). Se construye
+            // 5f. Hoja "Resumen" (v1.6.0): panel de cierre mensual con
+            //     SUMIFS sobre Resultado y Cierre. Se construye tras MES
+            //     para poder referenciar la hoja Resultado por fórmula.
+            new SummarySheetBuilder(config, report).build(result);
+
+            // 5g. Hoja de avisos (opt-in con report.inExcel=true). Se construye
             //     despues del resto de builders para recoger TODOS los warnings
             //     acumulados (perfiles sin match, apps sin mapeo, cabeceras no
             //     encontradas, etc.). En dry-run se construye igual: queda en
             //     memoria pero no se escribe a disco.
             new AvisosSheetBuilder(config, report).build(result);
 
-            // 5g. Escribir el resultado (omitido en dry-run)
+            // 5h. Escribir el resultado (omitido en dry-run)
             if (dryRun) {
                 log.info("[DRY-RUN] Omitida escritura de '{}'.", outputPath);
             } else {

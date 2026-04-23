@@ -25,12 +25,13 @@ excel-merger/
 │   │   ├── ExcelMerger.java             # Orquestador de la fusión
 │   │   ├── FileProfileResolver.java     # Identifica cada Excel por su contenido
 │   │   ├── MesSheetBuilder.java         # Construye la hoja Resultado
+│   │   ├── SummarySheetBuilder.java     # Hoja Resumen (sumatorio por matrícula)
 │   │   ├── DerivedSheetBuilder.java     # Hojas derivadas (fórmulas/agregación)
 │   │   └── LookupSheetBuilder.java      # Tablas de mapeo estáticas
 │   └── resources/
 │       └── config.properties            # Fallback empaquetado en el JAR
 ├── src/test/
-│   ├── java/com/excelmerger/            # Suite JUnit 5 (8 clases, 123 tests)
+│   ├── java/com/excelmerger/            # Suite JUnit 5 (9 clases, 156 tests)
 │   └── resources/
 │       ├── test-config.properties       # Config con placeholders para tests
 │       └── fixtures/                    # extraccion.xlsx, cierre.xlsx
@@ -279,6 +280,45 @@ mes.col.3.name=Equipo
 mes.col.3.type=FORMULA
 mes.col.3.formula=IFERROR(VLOOKUP({col:Aplicación},Equipos!$A:$B,2,FALSE),"")
 ```
+
+### Hoja Resumen (v1.6.0)
+
+Tabla adicional con el sumatorio por matrícula de varias columnas de `Resultado`. Se construye tras `MesSheetBuilder`, de modo que las fórmulas `SUMIFS` pueden referenciar las columnas calculadas (`PDCL`, `PDCL + Deuda`, etc.).
+
+Layout generado:
+
+- Fila 1: título `Resumen por <matriculaColumn>` con merge sobre todo el ancho (estilo negro/blanco, negrita).
+- Fila 3: cabecera (nombre de la columna clave + cada columna de valor, estilo gris).
+- Filas 4..N: una por cada matrícula única detectada en `Resultado`. Se emiten fórmulas `SUMIFS` con rangos acotados (`I2:I10000`) para que Apache POI pueda evaluarlas en los tests.
+- Fila N+1: `Total` + `SUM(4:last)` por cada columna (estilo gris, bordes medium, negrita).
+
+```properties
+# Habilita la hoja (opt-in explícito)
+summary.enabled=true
+
+# Nombre de la hoja generada
+summary.sheetName=Resumen
+
+# Hoja de donde se suman los valores (normalmente la hoja Resultado)
+summary.sumSheet=Resultado
+
+# Nombre de la columna clave. Debe coincidir con alguno de mes.col.N.name
+summary.matriculaColumn=Matrícula
+
+# Columnas cuyos valores se suman por matrícula (CSV).
+# Los nombres deben coincidir con mes.col.N.name. Las columnas no
+# encontradas se omiten con un warning, sin abortar la generación.
+summary.valueColumns=Jira,REAL,PDCL,PDCL + Deuda
+
+# Tope de fila para los rangos SUMIFS. El cuaderno original usa columnas
+# completas (I:I); aquí se acota para que POI pueda evaluarlas en tests.
+# Cambia este valor si alguna extracción mensual supera 10 000 filas.
+summary.sumifsMaxRow=10000
+```
+
+Las matrículas se auto-descubren leyendo la columna clave en `sumSheet`. Se incluyen todos los valores no vacíos: las numéricas (`99641`, `99642`...) se ordenan ascendentemente, y después se listan las no numéricas (`-`, `Sin Matricula`, etc.) en orden alfabético. Los vacíos/nulos se filtran.
+
+El validador estricto comprueba que `summary.sheetName` no colisione con ninguna otra hoja del libro, que `summary.sumSheet` sea una hoja conocida, y que `summary.valueColumns` no esté vacío. Si alguna columna listada en `valueColumns` no existe en `sumSheet`, no se aborta: se emite un warning `CABECERA` en el `RunReport` y se sigue con las que sí existen.
 
 ## Robustez y diagnóstico (v1.2.0)
 

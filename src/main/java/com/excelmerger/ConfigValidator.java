@@ -69,6 +69,7 @@ public class ConfigValidator {
 
         validateMes(knownSheets);
         validateDerived(knownSheets);
+        validateSummary(knownSheets);
 
         return Collections.unmodifiableList(new ArrayList<>(errors));
     }
@@ -351,6 +352,44 @@ public class ConfigValidator {
                     errors.add(prefix + "firstDataRow debe ser >= 1 (actual: " + firstDataRow + ").");
                 }
             }
+        }
+    }
+
+    private void validateSummary(Set<String> knownSheets) {
+        if (!config.getBoolean("summary.enabled", false)) {
+            return;
+        }
+
+        String sheetName = config.get("summary.sheetName", "Resumen");
+        if (isBlank(sheetName)) {
+            errors.add("summary.sheetName: valor requerido cuando summary.enabled=true.");
+        } else if (knownSheets.contains(sheetName)) {
+            errors.add("summary.sheetName: colisiona con otra hoja conocida '"
+                    + sheetName + "'. Hojas conocidas: " + knownSheets + ".");
+        }
+
+        String sumSheet = config.get("summary.sumSheet", "");
+        if (isBlank(sumSheet)) {
+            errors.add("summary.sumSheet: valor requerido (normalmente mes.sheetName).");
+        } else if (!knownSheets.contains(sumSheet)) {
+            errors.add("summary.sumSheet: referencia a hoja desconocida '" + sumSheet
+                    + "'. Hojas conocidas: " + knownSheets + ".");
+        }
+
+        if (isBlank(config.get("summary.matriculaColumn", ""))) {
+            errors.add("summary.matriculaColumn: valor requerido.");
+        }
+
+        String valueCols = config.get("summary.valueColumns", "");
+        if (isBlank(valueCols)) {
+            errors.add("summary.valueColumns: valor requerido (lista separada por comas).");
+        } else if (parseCsv(valueCols).isEmpty()) {
+            errors.add("summary.valueColumns: lista vacia tras parsear ('" + valueCols + "').");
+        }
+
+        Integer maxRow = parsePositiveInt("summary.sumifsMaxRow", 10000);
+        if (maxRow != null && maxRow < 1) {
+            errors.add("summary.sumifsMaxRow debe ser >= 1 (actual: " + maxRow + ").");
         }
     }
 

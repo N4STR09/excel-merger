@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.6.0] — Hoja resumen
+
+Minor que añade la hoja **Resumen** al libro de salida: una tabla con el sumatorio por matrícula de las columnas de horas de `Resultado` (`Jira`, `REAL`, `PDCL`, `PDCL + Deuda` por defecto) más una fila de totales. Inspirada en el cuaderno `DA23_*.xlsx` que se usa para el cierre mensual; simplificada para ser práctica y auditable desde Excel.
+
+### Añadido
+
+- Nueva clase `com.excelmerger.SummarySheetBuilder` en el paquete raíz, siguiendo el patrón de `MesSheetBuilder` y `AvisosSheetBuilder`. Recibe `ConfigLoader` y `RunReport` por constructor y expone `build(Workbook)`. Se engancha en `ExcelMerger.merge()` después de `DerivedSheetBuilder` y antes de `AvisosSheetBuilder` para que pueda leer la hoja `Resultado` ya construida.
+- Nuevas claves `summary.*` en `config.properties` (externo y fallback interno) y en `test-config.properties`:
+  - `summary.enabled` (`true`/`false`) — opt-in explícito.
+  - `summary.sheetName` — nombre de la hoja generada (default `Resumen`).
+  - `summary.sumSheet` — hoja que se agrega (normalmente `mes.sheetName`).
+  - `summary.matriculaColumn` — nombre de la columna clave en `sumSheet`.
+  - `summary.valueColumns` — lista CSV con las columnas a sumar.
+  - `summary.sumifsMaxRow` — tope de fila para los rangos `SUMIFS` (default `10000`; acotado para que POI pueda evaluar en tests).
+- Nuevos métodos en `com.excelmerger.util.StyleFactory` con la paleta del cuaderno de referencia: `summaryBlockHeader`, `summarySubHeaderGray`, `summarySubHeaderOrange`, `summaryValueCell`, `summaryNumericCell`, `summaryTotalCell`, `summaryBalanceCell`, `summaryLavenderCell`. Los colores se fijan como ARGB exactos (`#000000`, `#C0C0C0`, `#FFCC99`, `#CCCCFF`, `#FFFF00`, `#FF0000`) con `XSSFColor(byte[], IndexedColorMap)`.
+- `ConfigValidator.validateSummary()` — chequeos estáticos alineados con el resto de hojas (requeridos, colisión de nombre, referencia a hoja conocida).
+- `SummarySheetBuilderTest` — 10 casos nuevos cubriendo los escenarios habituales: deshabilitado, colisión de hoja, hoja origen inexistente, columna clave inexistente, columnas de valor parcialmente inexistentes (se omiten con warning, sin abortar), construcción básica, orden de matrículas (numéricas primero, luego strings), fórmulas `SUMIFS` con rangos acotados, fila de totales, registro en `RunReport`.
+- Columnas `PDCL` y `PDCL + Deuda` añadidas al `test-config.properties` para que los tests del Summary puedan validar las 4 columnas de valor configuradas por defecto. Sin cambios en los fixtures `extraccion.xlsx` ni `cierre.xlsx`, que mantienen sus magnitudes para no romper los tests existentes.
+
+### Diseño
+
+- **Auto-descubrimiento de matrículas**: se leen los valores no vacíos de la columna clave en `Resultado`. Las numéricas van ordenadas ascendentemente y después las no numéricas (por ejemplo `-` o `Sin Matricula`) en orden alfabético.
+- **Fórmulas SUMIFS con rangos acotados**: el cuaderno original usaba `I:I` (columna completa); aquí se acota a `I2:I10000` (configurable) para que `FormulaEvaluator` de POI pueda evaluarlas en los tests de integración. En Excel el rango sigue siendo más que suficiente para cualquier extracción mensual realista.
+- **Columnas de valor no encontradas**: se omiten silenciosamente con un warning `CABECERA` en `RunReport` en lugar de abortar la generación. Esto permite que el config pueda listar columnas opcionales (como `PDCL + Deuda`) sin romper si no están presentes.
+- **Estilos**: reutiliza la paleta capturada del cuaderno de referencia. Fila título con fondo negro y texto blanco en negrita; fila cabecera con fondo gris; fila totales con fondo gris, negrita y bordes medium; celdas de datos con formato numérico `0.0` y bordes finos.
+
+### Cambios de versión
+
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.5.2` a `1.6.0`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado en consecuencia.
+
+### Notas
+
+Esta versión se entregó tras un alcance inicial mucho mayor (réplica literal de los cuatro bloques del cuaderno `DA23_*.xlsx`: reparto, tickets, pre-cierre y matriz responsables × matrículas). Ese alcance se descartó a favor del resumen agregado simple por petición del usuario; el código intermedio no quedó en el árbol.
+
 ## [1.5.2] — Sesión E2: segunda pasada de calidad
 
 Patch sobre 1.5.0 que cierra los 6 code smells reales que la Sesión E había dejado anotados en `pmd-ruleset.xml` y baja el umbral de SpotBugs de `High` a `Medium` arreglando 2 NP_NULL reales y excluyendo con justificación los 8 issues restantes. **Sin cambios en comportamiento runtime ni en la API pública**. Los 146 tests siguen verdes (`MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado al nuevo literal `1.5.2`). Cobertura JaCoCo sigue en ≥ 70% INSTRUCTION.

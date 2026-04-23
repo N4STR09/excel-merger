@@ -56,7 +56,7 @@ class MainTest {
     void appVersionEsLaEsperadaPorLaSesionE() {
         // Este test fija la expectativa de versión al bump acordado.
         // Si se sube la versión, este test debe actualizarse conscientemente.
-        // 1.5.2: patch de la Sesión E2 (segunda pasada de calidad + SpotBugs Medium).
-        assertThat(Main.APP_VERSION).isEqualTo("1.5.2");
+        // 1.6.0: hoja "Resumen" (sumatorio por matrícula sobre Resultado).
+        assertThat(Main.APP_VERSION).isEqualTo("1.6.0");
     }
 }

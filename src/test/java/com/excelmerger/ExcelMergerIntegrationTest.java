@@ -5,6 +5,7 @@ import com.excelmerger.exception.OutputException;
 
 import org.apache.poi.ss.usermodel.CellValue;
 import org.apache.poi.ss.usermodel.FormulaEvaluator;
+import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
@@ -44,13 +45,15 @@ class ExcelMergerIntegrationTest {
         try (FileInputStream fis = new FileInputStream(output.toFile());
              Workbook wb = WorkbookFactory.create(fis)) {
 
-            // Esperamos 4 hojas: Cierre (de cierre.xlsx), Extraccion (de
-            // extraccion.xlsx), Equipos (lookup) y MES.
-            assertThat(wb.getNumberOfSheets()).isEqualTo(4);
+            // Esperamos 5 hojas: Cierre (de cierre.xlsx), Extraccion (de
+            // extraccion.xlsx), Equipos (lookup), Resultado (MES) y
+            // Resumen (sumatorio por matrícula, v1.6.0).
+            assertThat(wb.getNumberOfSheets()).isEqualTo(5);
             assertThat(wb.getSheet("Cierre")).isNotNull();
             assertThat(wb.getSheet("Extraccion")).isNotNull();
             assertThat(wb.getSheet("Equipos")).isNotNull();
             assertThat(wb.getSheet("Resultado")).isNotNull();
+            assertThat(wb.getSheet("Resumen")).isNotNull();
         }
     }
 
@@ -212,6 +215,49 @@ class ExcelMergerIntegrationTest {
                 "LOOKUP".equals(w.category)
                         && w.message.contains("sin mapeo")
                         && w.message.contains("ZZ"));
+    }
+
+    // ==================================================================
+    //  Hoja Resumen (v1.6.0)
+    // ==================================================================
+
+    @Test
+    void hojaResumenTrasPipelineCompletoExisteYContieneSumatoriosPorMatricula(
+            @TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resumen = wb.getSheet("Resumen");
+            assertThat(resumen).isNotNull();
+
+            // Fila 1 (idx 0): titulo
+            assertThat(resumen.getRow(0).getCell(0).getStringCellValue())
+                    .isEqualTo("Resumen por Matrícula");
+
+            // Fila 3 (idx 2): cabeceras segun test-config
+            assertThat(resumen.getRow(2).getCell(0).getStringCellValue()).isEqualTo("Matrícula");
+            assertThat(resumen.getRow(2).getCell(1).getStringCellValue()).isEqualTo("Jira");
+            assertThat(resumen.getRow(2).getCell(2).getStringCellValue()).isEqualTo("REAL");
+            assertThat(resumen.getRow(2).getCell(3).getStringCellValue()).isEqualTo("PDCL");
+            assertThat(resumen.getRow(2).getCell(4).getStringCellValue()).isEqualTo("PDCL + Deuda");
+
+            // Al menos una fila de datos con SUMIFS sobre Resultado
+            Row firstData = resumen.getRow(3);
+            assertThat(firstData).isNotNull();
+            String jiraFormula = firstData.getCell(1).getCellFormula();
+            assertThat(jiraFormula).startsWith("SUMIFS(");
+            assertThat(jiraFormula).contains("Resultado!");
+
+            // Fila de totales al final con SUM(4:...)
+            int last = resumen.getLastRowNum();
+            Row totals = resumen.getRow(last);
+            assertThat(totals.getCell(0).getStringCellValue()).isEqualTo("Total");
+            assertThat(totals.getCell(1).getCellFormula()).startsWith("SUM(B4:");
+        }
     }
 
     // ==================================================================
@@ -428,7 +474,8 @@ class ExcelMergerIntegrationTest {
                 .containsKey("Resultado")
                 .containsKey("Extraccion")
                 .containsKey("Cierre")
-                .containsKey("Equipos");
+                .containsKey("Equipos")
+                .containsKey("Resumen");
     }
 
     @Test

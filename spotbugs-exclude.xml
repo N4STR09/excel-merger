@@ -16,13 +16,13 @@
 <FindBugsFilter>
 
     <!--
-        EI_EXPOSE_REP2 en los 5 builders + ExcelMerger que aceptan RunReport
+        EI_EXPOSE_REP2 en los 6 builders + ExcelMerger que aceptan RunReport
         por constructor y lo guardan por referencia.
 
         Justificacion: RunReport es por diseño un agregador compartido. La CLI
         (Main) crea una unica instancia, se la pasa a ExcelMerger y este la
-        reinyecta en todos los builders (Lookup, Mes, Derived, Avisos) para
-        que cada uno acumule warnings en el mismo reporte. Al final Main
+        reinyecta en todos los builders (Lookup, Mes, Derived, Avisos, Summary)
+        para que cada uno acumule warnings en el mismo reporte. Al final Main
         lee report.formatSummary() e imprime el total. Clonar la referencia
         al recibirla romperia el proposito del agregador: cada builder
         escribiria en su propia copia y los warnings se perderian.
@@ -38,6 +38,7 @@
             <Class name="com.excelmerger.ExcelMerger"/>
             <Class name="com.excelmerger.LookupSheetBuilder"/>
             <Class name="com.excelmerger.MesSheetBuilder"/>
+            <Class name="com.excelmerger.SummarySheetBuilder"/>
         </Or>
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
