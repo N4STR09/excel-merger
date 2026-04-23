@@ -1,24 +1,89 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    SpotBugs exclude filter (Sesion E, Fase 3).
+    SpotBugs exclude filter.
 
     Este fichero se carga automaticamente desde el spotbugs-maven-plugin.
-    Cuando SpotBugs reporte un falso positivo real, anadir aqui un bloque
-    Match JUSTIFICADO con un comentario (FUERA del Match, justo encima)
-    explicando por que es falso positivo. Ejemplo sintactico (sin angle
-    brackets para no romper el parser XML del comentario):
+    Cuando SpotBugs reporte un falso positivo o un issue defendible,
+    anadir aqui un bloque Match JUSTIFICADO con un comentario (FUERA del
+    Match, justo encima) explicando por que.
 
-        Justificacion: los Excel de POI usan UTF-8 internamente;
-        esta advertencia viene del propio POI, no de nuestro codigo.
-        Match:
-          Class name = com.excelmerger.ExcelMerger
-          Method name = merge
-          Bug pattern = DM_DEFAULT_ENCODING
-
-    Esta primera version se deja vacia: el umbral de severidad esta en
-    HIGH, lo cual suele producir 0 o muy pocos issues sobre codigo
-    funcional. Si al ejecutar mvnw verify aparecen issues en HIGH, se
-    arreglan en el codigo o se anaden aqui con su justificacion.
+    Historial:
+      - Sesion E (1.5.0): umbral HIGH, 0 exclusiones.
+      - Sesion E2 (1.5.2): umbral bajado a MEDIUM. 10 issues reportados,
+        2 arreglados en codigo (NP_NULL en OutputManager), 8 excluidos
+        aqui con justificacion (ver bloques de abajo).
 -->
 <FindBugsFilter>
+
+    <!--
+        EI_EXPOSE_REP2 en los 5 builders + ExcelMerger que aceptan RunReport
+        por constructor y lo guardan por referencia.
+
+        Justificacion: RunReport es por diseño un agregador compartido. La CLI
+        (Main) crea una unica instancia, se la pasa a ExcelMerger y este la
+        reinyecta en todos los builders (Lookup, Mes, Derived, Avisos) para
+        que cada uno acumule warnings en el mismo reporte. Al final Main
+        lee report.formatSummary() e imprime el total. Clonar la referencia
+        al recibirla romperia el proposito del agregador: cada builder
+        escribiria en su propia copia y los warnings se perderian.
+
+        Es el patron correcto (Collecting Parameter / Observer compartido),
+        no una fuga de representacion. No hay mutacion externa inesperada:
+        la unica via de mutacion es addWarning(), documentada.
+    -->
+    <Match>
+        <Or>
+            <Class name="com.excelmerger.AvisosSheetBuilder"/>
+            <Class name="com.excelmerger.DerivedSheetBuilder"/>
+            <Class name="com.excelmerger.ExcelMerger"/>
+            <Class name="com.excelmerger.LookupSheetBuilder"/>
+            <Class name="com.excelmerger.MesSheetBuilder"/>
+        </Or>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!--
+        EI_EXPOSE_REP en ConfigLoader.getRawProperties().
+
+        Justificacion: el metodo se usa exclusivamente desde
+        FileProfileResolver.FileProfile.fromConfig para iterar las claves
+        con prefijo "profile.<id>.detect.cellValue.*" (claves con sufijo
+        dinamico que no pueden conocerse de antemano). Clonar el Properties
+        entero en cada llamada seria overhead innecesario para una lectura
+        de solo-iteracion. ConfigLoader se instancia una vez al arranque
+        y no muta tras su carga; la convencion de equipo es no llamar a
+        setters sobre el Properties devuelto (si algun dia se necesitara
+        reforzar, la firma pasaria a Set<String> getPropertyNames() con
+        migracion de llamadores, cambio de API no apto para un patch).
+    -->
+    <Match>
+        <Class name="com.excelmerger.ConfigLoader"/>
+        <Method name="getRawProperties"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+
+    <!--
+        CT_CONSTRUCTOR_THROW en los dos constructores publicos de
+        ConfigLoader (sin args y con path explicito).
+
+        Justificacion: ambos constructores lanzan ConfigurationException
+        si el fichero properties no existe o no se puede leer. El patron
+        "validar y lanzar en constructor" es intencional y alineado con
+        como se usa: Main llama new ConfigLoader(...) una vez al arranque
+        y, si hay fallo, se mapea a exit code 2 (CONFIG). El refactor
+        canonico (factoria estatica ConfigLoader.load(path) + constructor
+        privado no-lanzante) cambiaria la API publica y afectaria a Main
+        y a varios tests; queda anotado para una posible 1.6.0.
+
+        El riesgo de Finalizer attack que motiva CT_CONSTRUCTOR_THROW no
+        aplica a esta CLI standalone: no hay subclases hostiles, no hay
+        sandbox Java, no hay codigo no confiable con acceso a la JVM.
+    -->
+    <Match>
+        <Class name="com.excelmerger.ConfigLoader"/>
+        <Method name="&lt;init&gt;"/>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+
 </FindBugsFilter>
+

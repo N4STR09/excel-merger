@@ -34,11 +34,15 @@ public final class OutputManager {
      */
     public void assertOutputWritable(String outputPath) {
         Path out = Paths.get(outputPath);
+        Path fileName = out.getFileName();
+        if (fileName == null) {
+            throw new OutputException("output.file no apunta a un fichero: '" + outputPath + "'");
+        }
         Path parent = out.getParent();
         if (parent == null) parent = Paths.get(".");
-        Path lock = parent.resolve("~$" + out.getFileName().toString());
+        Path lock = parent.resolve("~$" + fileName.toString());
         if (Files.exists(lock)) {
-            throw new OutputException("Cierra '" + out.getFileName()
+            throw new OutputException("Cierra '" + fileName
                     + "' antes de ejecutar (parece abierto en Excel: existe el lock '"
                     + lock.getFileName() + "').");
         }
@@ -79,7 +83,11 @@ public final class OutputManager {
      * devuelve la ruta destino. Crea la carpeta 'history' si no existe.
      */
     public Path backupOutput(Path out) {
-        String fileName = out.getFileName().toString();
+        Path outName = out.getFileName();
+        if (outName == null) {
+            throw new OutputException("No se puede hacer backup de un path sin nombre de fichero: '" + out + "'");
+        }
+        String fileName = outName.toString();
         int dot = fileName.lastIndexOf('.');
         String base = (dot > 0) ? fileName.substring(0, dot) : fileName;
         String ext = (dot > 0) ? fileName.substring(dot) : "";

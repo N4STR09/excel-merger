@@ -1,12 +1,12 @@
 # Changelog
 
-## [1.5.1] — Sesión E2: segunda pasada de calidad
+## [1.5.2] — Sesión E2: segunda pasada de calidad
 
-Patch sobre 1.5.0 que cierra los 6 code smells reales que la Sesión E había dejado anotados en `pmd-ruleset.xml` y baja el umbral de SpotBugs de `High` a `Medium`. **Sin cambios en comportamiento runtime ni en la API pública**. Los 146 tests siguen verdes (`MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado al nuevo literal `1.5.1`). Cobertura JaCoCo sigue en ≥ 70% INSTRUCTION.
+Patch sobre 1.5.0 que cierra los 6 code smells reales que la Sesión E había dejado anotados en `pmd-ruleset.xml` y baja el umbral de SpotBugs de `High` a `Medium` arreglando 2 NP_NULL reales y excluyendo con justificación los 8 issues restantes. **Sin cambios en comportamiento runtime ni en la API pública**. Los 146 tests siguen verdes (`MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado al nuevo literal `1.5.2`). Cobertura JaCoCo sigue en ≥ 70% INSTRUCTION.
 
 ### Corregido
 
-Los 6 code smells quedan resueltos en código; las 6 exclusiones correspondientes desaparecen de `pmd-ruleset.xml`.
+Los 6 code smells de PMD quedan resueltos en código; las 6 exclusiones correspondientes desaparecen de `pmd-ruleset.xml`.
 
 - **`UnnecessaryCaseChange` en `PoiUtils.findColumnIndex`** — `cabecera.toUpperCase().equals(needle.toUpperCase())` reemplazado por `value.trim().equalsIgnoreCase(headerText.trim())`. Semántica idéntica para cabeceras ASCII del dominio (`CODIGO`, `CUENTA`, etc.). Se elimina también el `target` local que dejó de ser necesario.
 - **`UnusedLocalVariable` en `DerivedSheetBuilder.buildAggregationSheet`** — `int headerRow = config.getInt(prefix + "headerRow", 1);` eliminado. La variable se asignaba y nunca se leía; `firstDataRow` (que sí se usa) permanece.
@@ -15,16 +15,38 @@ Los 6 code smells quedan resueltos en código; las 6 exclusiones correspondiente
 - **`PreserveStackTrace` en `OutputManager.backupOutput`** — en el catch anidado `IOException atomicFailed → try REPLACE_EXISTING → catch IOException e`, la excepción original del intento atómico se descartaba si el fallback también fallaba. Fix: `e.addSuppressed(atomicFailed);` antes del `throw`. Conserva ambas trazas sin alterar el tipo ni el mensaje de la excepción pública; el constructor `OutputException(String, Throwable)` ya existía.
 - **`AvoidRethrowingException` en `ExcelMerger.merge`** — eliminado el `catch (ExcelMergerException e) { throw e; }` redundante del try-with-resources. `ExcelMergerException extends RuntimeException`, así que la excepción se propaga igual sin el catch explícito y sin necesidad de cambiar la firma del método. El `catch (IOException e) → throw new MergeException(..., e)` que le seguía se mantiene intacto.
 
+Adicionalmente, 2 bugs reales reportados por SpotBugs en `Medium`:
+
+- **`NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE` en `OutputManager.assertOutputWritable`** — `Paths.get(outputPath).getFileName()` puede devolver `null` si la ruta es una raíz (`/`, `C:\`). Se añade null-check explícito que lanza `OutputException` con mensaje claro (`"output.file no apunta a un fichero: ..."`) en vez de NPE opaco. Caso poco probable en uso normal pero defensa en profundidad correcta.
+- **`NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE` en `OutputManager.backupOutput`** — mismo patrón con `out.getFileName().toString()`. Se extrae a variable local con validación previa. En la práctica el callsite (`prepareOutputFile`) solo invoca `backupOutput` si `Files.exists(out)` es true, por lo que en runtime real el null no llega nunca, pero el fix silencia el análisis y cubre el caso hipotético de llamada directa.
+
 ### Mantenimiento
 
-- **`pmd-ruleset.xml`**: retiradas las 6 exclusiones con sus comentarios "Anotado". El ruleset queda más limpio: ya no convive "regla activa" con "excepción anotada para sesión futura" para estas seis reglas.
-- **SpotBugs**: umbral bajado de `High` a `Medium` en `pom.xml` (`<threshold>Medium</threshold>`). El comentario del plugin se actualiza para reflejar el cambio.
-- **Version bump**: `pom.xml` y `Main.APP_VERSION` pasan de `1.5.0` a `1.5.1`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado en consecuencia — es el único test que tocó esta sesión.
+**PMD**
+- `pmd-ruleset.xml`: retiradas las 6 exclusiones con sus comentarios "Anotado". El ruleset queda más limpio: ya no convive "regla activa" con "excepción anotada para sesión futura" para estas seis reglas.
+
+**SpotBugs: High → Medium**
+
+Umbral bajado en `pom.xml` (`<threshold>Medium</threshold>`). El comentario del plugin se actualiza para reflejar el cambio.
+
+Tras bajar, SpotBugs reportó 10 issues. Clasificación:
+
+- **2 bugs reales triviales** (arreglados en código; ver sección "Corregido" arriba): los `NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE` en `OutputManager`.
+- **6 falsos positivos defendibles** (excluidos con justificación en `spotbugs-exclude.xml`):
+    - 5× `EI_EXPOSE_REP2` en `AvisosSheetBuilder`, `DerivedSheetBuilder`, `ExcelMerger`, `LookupSheetBuilder`, `MesSheetBuilder`: los constructores guardan la referencia del `RunReport` recibido. **RunReport es por diseño un agregador compartido** — Main crea una instancia, ExcelMerger la distribuye a todos los builders para que acumulen warnings, y Main lee el reporte final. Clonar rompería el patrón. Es el uso correcto de Collecting Parameter, no una fuga de representación.
+    - 1× `EI_EXPOSE_REP` en `ConfigLoader.getRawProperties()`: el método se usa exclusivamente desde `FileProfileResolver.FileProfile.fromConfig` para iterar claves con sufijo dinámico (`profile.<id>.detect.cellValue.*`). Clonar el `Properties` en cada lectura es overhead sin beneficio — `ConfigLoader` no muta tras la carga. Si en el futuro se quiere endurecer, la migración natural es a `Set<String> getPropertyNamesStartingWith(String prefix)`, pero eso cambia la API y queda fuera del alcance de un patch.
+- **2 issues reales pero con ripple de API no trivial** (excluidos con justificación, anotados para posible 1.6.0):
+    - 2× `CT_CONSTRUCTOR_THROW` en los dos constructores públicos de `ConfigLoader`: ambos lanzan `ConfigurationException` si el properties no existe. El refactor canónico (factoría estática `ConfigLoader.load(path)` + constructor privado no-lanzante) cambiaría la API pública y afectaría a `Main` y varios tests. El riesgo de Finalizer attack que motiva la regla no aplica a esta CLI standalone (no hay subclases hostiles, no hay sandbox, no hay código no confiable con acceso a la JVM).
+
+Las tres reglas quedan excluidas con bloques `<Match>` precisos en `spotbugs-exclude.xml` (scope limitado a clases/métodos concretos, nunca `Bug pattern="..."` global) y cada una lleva un comentario de justificación.
+
+**Version bump**
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.5.0` a `1.5.2`. `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado en consecuencia — es el único test que tocó esta sesión.
 
 ### Sin cambios
 
 - Comportamiento runtime del merge: los builders, la resolución de perfiles, la escritura del Excel y los códigos de salida son idénticos a 1.5.0.
-- API pública: las firmas de `PoiUtils.findColumnIndex`, `OutputManager.backupOutput`, `ExcelMerger.merge`, `FileProfileResolver.FileProfile.*` y `Main.*` no cambian.
+- API pública: las firmas de `PoiUtils.findColumnIndex`, `OutputManager.backupOutput`, `OutputManager.assertOutputWritable`, `ExcelMerger.merge`, `FileProfileResolver.FileProfile.*`, `ConfigLoader.*` y `Main.*` no cambian.
 - Formato del código fuera de los sitios listados: no se ha reformateado nada más.
 
 ---

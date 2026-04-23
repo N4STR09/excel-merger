@@ -6,7 +6,7 @@
 
     <groupId>com.excelmerger</groupId>
     <artifactId>excel-merger</artifactId>
-    <version>1.5.1</version>
+    <version>1.5.2</version>
     <packaging>jar</packaging>
 
     <name>Excel Merger</name>
