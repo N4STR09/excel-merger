@@ -568,4 +568,132 @@ class MesSheetBuilderTest {
                         && w.message.contains("redIfNotEqualTo")
                         && w.message.contains("NoExiste"));
     }
+
+    // ==================================================================
+    //  v2.1.0 — columna Funcion (COPY desde Cierre.Funcion)
+    // ==================================================================
+
+    /**
+     * Monta un workbook origen con las columnas minimas necesarias para
+     * probar la semantica de la nueva columna Funcion: Peticion (ancla),
+     * Recurso (Matricula), Funcion. Cada fila se pasa como un array
+     * {peticion, recurso, funcion}. Una peticion vacia salta la fila.
+     */
+    private static Workbook buildSourceWithFuncion(String[]... rows) {
+        Workbook wb = new XSSFWorkbook();
+        Sheet s = wb.createSheet("Cierre");
+
+        Row header = s.createRow(0);
+        header.createCell(0).setCellValue("Peticion");
+        header.createCell(1).setCellValue("Recurso");
+        header.createCell(2).setCellValue("Funcion");
+
+        for (int i = 0; i < rows.length; i++) {
+            Row r = s.createRow(i + 1);
+            r.createCell(0).setCellValue(rows[i][0]);
+            r.createCell(1).setCellValue(rows[i][1]);
+            r.createCell(2).setCellValue(rows[i][2]);
+        }
+        return wb;
+    }
+
+    private static Properties mesConfigWithFuncion() {
+        Properties p = new Properties();
+        p.setProperty("mes.enabled", "true");
+        p.setProperty("mes.sheetName", "Resultado");
+        p.setProperty("mes.sourceSheet", "Cierre");
+        p.setProperty("mes.sourceHeaderRow", "1");
+        p.setProperty("mes.anchorColumn", "Peticion");
+        // Layout minimo alineado con la v2.1.0: Peticion, Matricula, Funcion.
+        // Matricula en col.2 y Funcion en col.3 — el contrato "Funcion justo
+        // despues de Matricula" se testea aqui.
+        p.setProperty("mes.col.1.name", "Petición");
+        p.setProperty("mes.col.1.type", "COPY");
+        p.setProperty("mes.col.1.from", "Peticion");
+        p.setProperty("mes.col.2.name", "Matrícula");
+        p.setProperty("mes.col.2.type", "COPY");
+        p.setProperty("mes.col.2.from", "Recurso");
+        p.setProperty("mes.col.3.name", "Funcion");
+        p.setProperty("mes.col.3.type", "COPY");
+        p.setProperty("mes.col.3.from", "Funcion");
+        return p;
+    }
+
+    @Test
+    void funcionCopiaValorDesdeCierreTalCual() throws Exception {
+        // Caso basico: la celda Funcion de Resultado copia exactamente el
+        // valor de Cierre.Funcion, sin transformaciones.
+        Properties p = mesConfigWithFuncion();
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWithFuncion(
+                new String[]{"P-1", "M-1001", "AN"},
+                new String[]{"P-2", "M-1002", "DI"},
+                new String[]{"P-3", "M-1003", "PR"})) {
+            new MesSheetBuilder(cfg, report).build(wb);
+
+            Sheet mes = wb.getSheet("Resultado");
+            assertThat(mes).isNotNull();
+            // Cabecera: col 0=Petición, 1=Matrícula, 2=Funcion
+            assertThat(mes.getRow(0).getCell(2).getStringCellValue()).isEqualTo("Funcion");
+            // Valores copiados tal cual
+            assertThat(mes.getRow(1).getCell(2).getStringCellValue()).isEqualTo("AN");
+            assertThat(mes.getRow(2).getCell(2).getStringCellValue()).isEqualTo("DI");
+            assertThat(mes.getRow(3).getCell(2).getStringCellValue()).isEqualTo("PR");
+        }
+    }
+
+    @Test
+    void funcionPreservaGuionComoValorLiteral() throws Exception {
+        // Decision del usuario (v2.1.0, fase 0, pregunta 4): si la celda
+        // origen trae "-", la celda destino tambien trae "-". No hay
+        // normalizacion a vacio ni filtrado.
+        Properties p = mesConfigWithFuncion();
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWithFuncion(
+                new String[]{"P-1", "M-1001", "AN"},
+                new String[]{"P-2", "-",     "-"})) {
+            new MesSheetBuilder(cfg, report).build(wb);
+
+            Sheet mes = wb.getSheet("Resultado");
+            assertThat(mes.getRow(2).getCell(1).getStringCellValue()).isEqualTo("-");
+            assertThat(mes.getRow(2).getCell(2).getStringCellValue()).isEqualTo("-");
+        }
+    }
+
+    @Test
+    void funcionGeneraUnaFilaPorCombinacionMatriculaFuncion() throws Exception {
+        // Semantica B3 confirmada en Fase 0: una misma matricula con N
+        // funciones distintas en Cierre genera N filas en Resultado, porque
+        // Resultado es una fila por peticion+recurso+funcion original de
+        // Cierre. Este test lo blinda: misma matricula M-1001, tres
+        // funciones (AN, DI, PR) -> tres filas distintas en Resultado, todas
+        // con la misma matricula pero distinta funcion.
+        Properties p = mesConfigWithFuncion();
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWithFuncion(
+                new String[]{"P-1", "M-1001", "AN"},
+                new String[]{"P-2", "M-1001", "DI"},
+                new String[]{"P-3", "M-1001", "PR"})) {
+            new MesSheetBuilder(cfg, report).build(wb);
+
+            Sheet mes = wb.getSheet("Resultado");
+            // 1 cabecera + 3 filas de datos
+            assertThat(mes.getLastRowNum()).isEqualTo(3);
+
+            // Las 3 filas comparten matricula pero difieren en funcion
+            assertThat(mes.getRow(1).getCell(1).getStringCellValue()).isEqualTo("M-1001");
+            assertThat(mes.getRow(2).getCell(1).getStringCellValue()).isEqualTo("M-1001");
+            assertThat(mes.getRow(3).getCell(1).getStringCellValue()).isEqualTo("M-1001");
+
+            assertThat(mes.getRow(1).getCell(2).getStringCellValue()).isEqualTo("AN");
+            assertThat(mes.getRow(2).getCell(2).getStringCellValue()).isEqualTo("DI");
+            assertThat(mes.getRow(3).getCell(2).getStringCellValue()).isEqualTo("PR");
+        }
+    }
 }

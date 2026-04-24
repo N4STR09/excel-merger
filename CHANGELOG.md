@@ -1,5 +1,69 @@
 # Changelog
 
+## [2.1.0] — Columna `Funcion` en la hoja `Resultado`
+
+Release minor. Añade una columna `Funcion` a la hoja `Resultado`, inmediatamente después de `Matrícula`. El valor se copia tal cual desde la columna `Funcion` de la hoja `Cierre`. Cero cambios de código de producción: el builder ya era data-driven y el cambio se resuelve en los tres `config.properties`. Se actualizan los tests que accedían a `Resultado` por índice absoluto y se añade cobertura nueva para la columna.
+
+⚠️ **Nota de validación**: esta release se preparó en un entorno sin acceso a Maven Central. `mvnw verify` **no ha sido ejecutado** para certificar la release. Los cambios están validados por (a) análisis estático completo de todas las referencias cruzadas a las columnas de `Resultado` en código y tests, (b) verificación de que `MesSheetBuilder.loadColumns()` y `ConfigValidator.validateMes()` son ambos data-driven (iteran `mes.col.N.*` hasta hueco, sin hardcodear número), (c) auditoría línea a línea de los `getCell(N)` en `ExcelMergerIntegrationTest` para identificar exactamente qué índices se desplazan. Antes de publicar, correr `./mvnw verify` localmente y confirmar 202 tests verdes y cobertura ≥70%.
+
+### Semántica acordada (Fase 0)
+
+Decisiones cerradas con el usuario antes de tocar código:
+
+1. La columna se añade a la hoja `Resultado` (no al `Resumen`), inmediatamente **después de `Matrícula`**.
+2. Fuente: columna `Funcion` de la hoja `Cierre`, **copia directa** sin transformación.
+3. Semántica de cardinalidad (B3): una matrícula con N funciones distintas en `Cierre` genera N filas en `Resultado`, una por petición+recurso+función original. No hay pivot, no hay concatenación, no hay agregación; `Resultado` ya era una fila por petición, simplemente esa fila ahora expone además su función.
+4. Si el valor origen es `"-"`, se propaga tal cual.
+5. Sin toggle de configuración: la columna está **siempre presente** (no hay `mes.funcion.enabled`).
+6. `--dry-run`: comportamiento idéntico al resto del pipeline (la columna se calcula en memoria; el dry-run solo evita la escritura del XLSX final).
+
+### Cambiado
+
+- **`config.properties` (raíz)**: insertada `mes.col.7.name=Funcion` (`type=COPY`, `from=Funcion`) entre `Matrícula` (col.6) y `Estado` (col.7 previa). Las columnas 7–14 previas se desplazan a 8–15. Total: **15 columnas** (antes 14). Comentario de cabecera actualizado a "15 columnas de Resultado".
+
+- **`src/main/resources/config.properties`** (fallback del JAR): mismo cambio equivalente. Total: 15 columnas.
+
+- **`src/test/resources/test-config.properties`**: insertada `mes.col.7.name=Funcion` (`type=COPY`, `from=Funcion`). Las columnas 7–9 previas (`Res. Tecnico`, `PDCL`, `PDCL + Deuda`) se desplazan a 8–10. Total: **10 columnas** (antes 9).
+
+### Tests actualizados por desplazamiento de índices
+
+`ExcelMergerIntegrationTest` — tres asserts que accedían a `Resultado` por índice 0-based a partir de la posición 6 se desplazan +1:
+
+| Test | Antes | Después | Columna |
+|---|---|---|---|
+| `orphansEnabledColumnasSinDatoRecibenLiteralGuion` | `getCell(6)` | `getCell(7)` | `Res. Tecnico` |
+| `orphansEnabledColumnasFormulaCalculanJiraPor12` | `getCell(7)`, `getCell(8)` | `getCell(8)`, `getCell(9)` | `PDCL`, `PDCL + Deuda` |
+| `trimV181ResolvsMatrizMg002` | `getCell(6)` | `getCell(7)` | `Res. Tecnico` |
+
+Comentarios de cada test actualizados para reflejar el nuevo layout con `Funcion` en índice 6.
+
+Asserts con `getCell(N)` para `N ∈ {0, 3, 4, 5}` **no cambian** (Petición/Jira/REAL/Matrícula van antes de la inserción).
+
+### Tests nuevos
+
+- **`MesSheetBuilderTest`** (3):
+  - `funcionCopiaValorDesdeCierreTalCual` — verifica cabecera `Funcion` y copia literal de 3 funciones distintas (`AN`, `DI`, `PR`).
+  - `funcionPreservaGuionComoValorLiteral` — blinda decisión 4 (el `"-"` no se normaliza a vacío).
+  - `funcionGeneraUnaFilaPorCombinacionMatriculaFuncion` — blinda la semántica B3 (misma matrícula × 3 funciones ⇒ 3 filas distintas con la misma matrícula y distinta función).
+
+- **`ExcelMergerIntegrationTest`** (3, con `FormulaEvaluator` donde aplica, regla inquebrantable 4):
+  - `resultadoIncluyeColumnaFuncionJustoDespuesDeMatricula` — verifica cabecera de `Resultado` en el pipeline real: `Matrícula` en índice 5, `Funcion` en índice 6.
+  - `resultadoPdclYPdclMasDeudaSiguenCalculandoTrasDesplazarFuncion` — evalúa con `FormulaEvaluator` que `Jira`, `REAL`, `PDCL` y `PDCL + Deuda` siguen calculando sus valores correctos tras el desplazamiento de índices. P-001: `Jira=5`, `REAL=6`, `PDCL=6`, `PDCL+Deuda=6`. Test de guardia anti-regresión por si alguien introdujera fórmulas con referencias absolutas por letra.
+  - `resultadoFuncionParaHuerfanoGuionSePropagaComoGuion` — con `mes.orphans.enabled=true`, la fila huérfana `TICKETS` recibe `"-"` en la columna `Funcion` (coherente con el resto de columnas COPY sin datos de origen en huérfanos).
+
+### Sin cambios
+
+- `MesSheetBuilder.java`, `SummarySheetBuilder.java`, `ConfigValidator.java`, `RunReport.java`, ningún código de producción se modifica. Todos los builders y validadores ya localizaban columnas por nombre (`PoiUtils.findColumnIndex`) y parseaban las columnas MES iterando `mes.col.N.*` hasta encontrar un hueco.
+- Fixtures `.xlsx` sin modificar. `Cierre` ya trae la columna `Funcion` en sus cabeceras (línea 48 del config principal), y los tests nuevos que necesitaban variedad de funciones (distintas por matrícula) usan workbooks sintéticos in-memory, no contaminan los fixtures compartidos.
+- La hoja `Resumen` (dos tablas apiladas, `SummarySheetBuilder`) no cambia en absoluto.
+
+### Bump
+
+- `pom.xml`: `2.0.1` → `2.1.0`.
+- `Main.APP_VERSION`: `2.0.1` → `2.1.0`.
+
+---
+
 ## [2.0.1] — Segunda vuelta de limpieza PMD
 
 Release patch. Sin cambios funcionales, sin cambios de API pública, sin cambios de configuración. Se atacan las exclusiones del `pmd-ruleset.xml` que en 2.0.0 se habían anotado como "para segunda pasada", dejando solo las que responden a decisiones arquitectónicas conscientes.

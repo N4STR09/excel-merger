@@ -457,11 +457,11 @@ class ExcelMergerIntegrationTest {
             for (int r = 1; r <= mes.getLastRowNum(); r++) {
                 String pet = mes.getRow(r).getCell(0).getStringCellValue();
                 if (!"TICKETS".equals(pet)) continue;
-                // Columnas MES en test-config:
+                // Columnas MES en test-config (v2.1.0 con Funcion en posicion 7):
                 //  0=Petición, 1=Aplicación, 2=Equipo, 3=Jira, 4=REAL,
-                //  5=Matrícula, 6=Res. Tecnico, 7=PDCL, 8=PDCL + Deuda.
+                //  5=Matrícula, 6=Funcion, 7=Res. Tecnico, 8=PDCL, 9=PDCL + Deuda.
                 assertThat(mes.getRow(r).getCell(1).getStringCellValue()).isEqualTo("-");
-                assertThat(mes.getRow(r).getCell(6).getStringCellValue()).isEqualTo("-");
+                assertThat(mes.getRow(r).getCell(7).getStringCellValue()).isEqualTo("-");
                 return;
             }
             throw new AssertionError("No se encontro fila TICKETS en Resultado");
@@ -486,13 +486,14 @@ class ExcelMergerIntegrationTest {
             for (int r = 1; r <= mes.getLastRowNum(); r++) {
                 String pet = mes.getRow(r).getCell(0).getStringCellValue();
                 if (!"TICKETS".equals(pet)) continue;
+                // Indices (v2.1.0 con Funcion en 6): 3=Jira, 4=REAL, 8=PDCL, 9=PDCL+Deuda.
                 // Jira=8.0, REAL=9.6, PDCL=9.6, PDCL+Deuda=9.6
                 assertThat(mes.getRow(r).getCell(3).getNumericCellValue()).isEqualTo(8.0);
                 CellValue real = evaluator.evaluate(mes.getRow(r).getCell(4));
                 assertThat(real.getNumberValue()).isEqualTo(9.6);
-                CellValue pdcl = evaluator.evaluate(mes.getRow(r).getCell(7));
+                CellValue pdcl = evaluator.evaluate(mes.getRow(r).getCell(8));
                 assertThat(pdcl.getNumberValue()).isEqualTo(9.6);
-                CellValue pdclPlus = evaluator.evaluate(mes.getRow(r).getCell(8));
+                CellValue pdclPlus = evaluator.evaluate(mes.getRow(r).getCell(9));
                 assertThat(pdclPlus.getNumberValue()).isEqualTo(9.6);
                 return;
             }
@@ -1336,10 +1337,10 @@ class ExcelMergerIntegrationTest {
             }
             assertThat(p016Row).as("Fila P-016 debe existir en Resultado").isGreaterThan(0);
 
-            // Res. Tecnico es la col.7 del test-config (no col.8 del config
-            // raíz — el layout es distinto porque test-config compacta
-            // columnas). col.7 -> indice 0-based = 6.
-            Cell resTecnicoCell = resultado.getRow(p016Row).getCell(6);
+            // Res. Tecnico es la col.8 del test-config (v2.1.0 con Funcion
+            // en col.7). No col.9 del config raíz — el layout es distinto
+            // porque test-config compacta columnas. col.8 -> indice 0-based = 7.
+            Cell resTecnicoCell = resultado.getRow(p016Row).getCell(7);
             assertThat(resTecnicoCell.getCellType()).isEqualTo(CellType.STRING);
             assertThat(resTecnicoCell.getStringCellValue())
                     .as("Tras el trim, Res. Tecnico en Resultado no debe tener padding")
@@ -1394,6 +1395,114 @@ class ExcelMergerIntegrationTest {
                     .as("(M-1010, MG002) PDCL = 5 (Jira tras SUMIFS con Funcion=Dev) * 1.2 = 6.0. "
                             + "Si sale 0, el trim de Usuario_Resp_Tecnico no se aplico y el bug 1.8.1 vuelve.")
                     .isCloseTo(6.0, org.assertj.core.data.Offset.offset(1e-6));
+        }
+    }
+
+    // ==================================================================
+    //  v2.1.0 — columna Funcion en Resultado
+    // ==================================================================
+
+    @Test
+    void resultadoIncluyeColumnaFuncionJustoDespuesDeMatricula(@TempDir Path tmp) throws IOException {
+        // Regresion v2.1.0: la columna Funcion se inserta en el layout de
+        // Resultado inmediatamente despues de Matricula. En test-config,
+        // Matricula es col.6 (index 5) y Funcion es col.7 (index 6).
+        // Verifica cabecera y al menos una fila con valor copiado de Cierre.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resultado = wb.getSheet("Resultado");
+
+            // Cabecera
+            Row header = resultado.getRow(0);
+            assertThat(header.getCell(5).getStringCellValue()).isEqualTo("Matrícula");
+            assertThat(header.getCell(6).getStringCellValue())
+                    .as("Funcion debe estar en la posicion inmediatamente posterior a Matricula")
+                    .isEqualTo("Funcion");
+
+            // Al menos una fila trae el valor copiado desde Cierre.Funcion.
+            // En el fixture realista (cierre.xlsx), todas las peticiones
+            // P-001..P-016 tienen Funcion="Dev".
+            assertThat(resultado.getRow(1).getCell(6).getStringCellValue())
+                    .as("La primera fila de datos debe copiar la funcion de Cierre")
+                    .isEqualTo("Dev");
+        }
+    }
+
+    @Test
+    void resultadoPdclYPdclMasDeudaSiguenCalculandoTrasDesplazarFuncion(@TempDir Path tmp) throws IOException {
+        // Regresion v2.1.0 (regla inquebrantable 4: tests con FormulaEvaluator).
+        // Al insertar Funcion en posicion 7 de test-config se desplazan los
+        // indices de PDCL (antes col.8 -> ahora col.9, index 8) y PDCL+Deuda
+        // (antes col.9 -> ahora col.10, index 9). Las formulas deben seguir
+        // evaluando correctamente post-desplazamiento. Usamos P-001, que en
+        // el fixture tiene Jira=5.0 (PROJ-1 3h + PROJ-2 2h = 5h, filtrado
+        // Funcion=Dev deja fuera PROJ-3 Sup). Esperado: REAL=6.0, PDCL=6.0,
+        // PDCL+Deuda=6.0.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resultado = wb.getSheet("Resultado");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            // P-001 es la primera fila de datos.
+            Row row = resultado.getRow(1);
+            assertThat(row.getCell(0).getStringCellValue()).isEqualTo("P-001");
+
+            // Indices (v2.1.0): 3=Jira, 4=REAL, 5=Matrícula, 6=Funcion,
+            // 7=Res. Tecnico, 8=PDCL, 9=PDCL + Deuda.
+            CellValue jira = evaluator.evaluate(row.getCell(3));
+            assertThat(jira.getNumberValue())
+                    .as("Jira SUMIFS filtrado por Funcion=Dev en P-001: PROJ-1 + PROJ-2 = 5h")
+                    .isEqualTo(5.0);
+            CellValue real = evaluator.evaluate(row.getCell(4));
+            assertThat(real.getNumberValue()).isEqualTo(6.0);
+            CellValue pdcl = evaluator.evaluate(row.getCell(8));
+            assertThat(pdcl.getNumberValue())
+                    .as("PDCL tras desplazarse al index 8 debe seguir evaluando Jira*1.2")
+                    .isEqualTo(6.0);
+            CellValue pdclPlus = evaluator.evaluate(row.getCell(9));
+            assertThat(pdclPlus.getNumberValue())
+                    .as("PDCL+Deuda tras desplazarse al index 9 debe seguir referenciando PDCL")
+                    .isEqualTo(6.0);
+        }
+    }
+
+    @Test
+    void resultadoFuncionParaHuerfanoGuionSePropagaComoGuion(@TempDir Path tmp) throws IOException {
+        // Decision fase 0 del usuario: cuando el valor de origen es "-",
+        // la columna Funcion lo copia tal cual. El fixture tiene una fila
+        // de cierre con todas las celdas a "-" (ultima fila). Esa fila
+        // se omite en Resultado porque la ancla Peticion esta vacia, asi
+        // que aqui lo comprobamos via el SUMIFS huerfano: la fila
+        // TICKETS/- que introduce el modo orphans toma Funcion="-".
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resultado = wb.getSheet("Resultado");
+            for (int r = 1; r <= resultado.getLastRowNum(); r++) {
+                String pet = resultado.getRow(r).getCell(0).getStringCellValue();
+                if (!"TICKETS".equals(pet)) continue;
+                // Funcion es el index 6 en test-config v2.1.0. Los huerfanos
+                // rellenan con "-" todas las columnas COPY sin dato de origen.
+                assertThat(resultado.getRow(r).getCell(6).getStringCellValue())
+                        .as("Funcion del huerfano TICKETS debe ser '-'")
+                        .isEqualTo("-");
+                return;
+            }
+            throw new AssertionError("No se encontro fila TICKETS en Resultado");
         }
     }
 

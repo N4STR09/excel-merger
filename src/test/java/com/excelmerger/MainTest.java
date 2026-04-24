@@ -86,6 +86,9 @@ class MainTest {
         //        ficheros de entrada habituales. Deteccion sigue siendo
         //        por contenido. Ver CHANGELOG [2.0.0] para guia de migracion.
         // 2.0.1: segunda vuelta de limpieza PMD (sin cambios funcionales).
-        assertThat(Main.APP_VERSION).isEqualTo("2.0.1");
+        // 2.1.0: columna Funcion en Resultado (tras Matricula, copia desde
+        //        Cierre.Funcion). Cambio data-driven en config; sin tocar
+        //        codigo de produccion.
+        assertThat(Main.APP_VERSION).isEqualTo("2.1.0");
     }
 }

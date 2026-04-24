@@ -275,29 +275,38 @@ mes.col.1.name=Petición
 mes.col.1.type=COPY
 mes.col.1.from=Peticion
 
-mes.col.9.name=Jira
-mes.col.9.type=SUMIFS
-mes.col.9.from=Extraccion
-mes.col.9.sum=Hours
-mes.col.9.match=Component Name:Peticion,Matricula:Recurso
+# v2.1.0: columna Funcion (AN, DI, PR, OT, IN, RE, SC, TE, ...) copiada
+# desde Cierre, inmediatamente despues de Matricula. Si el valor original
+# es "-", se copia tal cual.
+mes.col.7.name=Funcion
+mes.col.7.type=COPY
+mes.col.7.from=Funcion
 
-mes.col.10.name=REAL
-mes.col.10.type=FORMULA
-mes.col.10.formula={col:Jira}*1.2
+mes.col.10.name=Jira
+mes.col.10.type=SUMIFS
+mes.col.10.from=Extraccion
+mes.col.10.sum=Hours
+mes.col.10.match=Component Name:Peticion,Matricula:Recurso,Funcion:Funcion
 
-mes.col.11.name=PDCL
+mes.col.11.name=REAL
 mes.col.11.type=FORMULA
 mes.col.11.formula={col:Jira}*1.2
-mes.col.11.fill=LIGHT_GREEN
 
-mes.col.12.name=PDCL + Deuda
+mes.col.12.name=PDCL
 mes.col.12.type=FORMULA
-mes.col.12.formula={col:PDCL}
-mes.col.12.fill=MEDIUM_GREEN
-mes.col.12.redIfNotEqualTo=PDCL
+mes.col.12.formula={col:Jira}*1.2
+mes.col.12.fill=LIGHT_GREEN
+
+mes.col.13.name=PDCL + Deuda
+mes.col.13.type=FORMULA
+mes.col.13.formula={col:PDCL}
+mes.col.13.fill=MEDIUM_GREEN
+mes.col.13.redIfNotEqualTo=PDCL
 ```
 
 En el ejemplo anterior, `PDCL` aparece sobre fondo verde muy claro y `PDCL + Deuda` sobre fondo verde un tono más oscuro; además, cualquier celda de `PDCL + Deuda` cuyo valor no coincida con el de `PDCL` en la misma fila se pinta en rojo claro, como alerta visual de modificaciones manuales.
+
+**Columna `Funcion` (v2.1.0)**: tras `Matrícula`, se añade una columna `Funcion` que se copia tal cual desde `Cierre.Funcion`. En `Cierre`, una misma matrícula puede aparecer en varias peticiones con funciones distintas (`AN`, `DI`, `PR`, `OT`, `IN`, `RE`, `SC`, `TE`, ...); cada petición es su propia fila en `Resultado`, y cada fila expone su propia función. No hay agregación ni concatenación: si la matrícula `M-1001` tiene 3 peticiones con funciones `AN`, `DI` y `PR`, aparecen 3 filas en `Resultado` con esa matrícula, una por función. El literal `"-"` del origen se preserva sin normalizar.
 
 ### Hojas de lookup
 
