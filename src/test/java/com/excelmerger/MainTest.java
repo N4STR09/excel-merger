@@ -78,6 +78,13 @@ class MainTest {
         //        Nueva clave de config profile.<id>.trim.columns aplica
         //        trim() en la capa de copia; todas las hojas aguas abajo
         //        consumen valores limpios. Fix via copyCellValueAsTextTrimmed.
-        assertThat(Main.APP_VERSION).isEqualTo("1.8.1");
+        // 2.0.0: BREAKING CHANGE. Swap de nombres de perfil: el perfil que
+        //        contenia las peticiones del ERP se llamaba "Extraccion"
+        //        hasta 1.8.1; en 2.0.0 pasa a llamarse "Cierre". El perfil
+        //        con el export de Jira se llamaba "Cierre"; pasa a llamarse
+        //        "Extraccion". Los nombres ahora coinciden con los de los
+        //        ficheros de entrada habituales. Deteccion sigue siendo
+        //        por contenido. Ver CHANGELOG [2.0.0] para guia de migracion.
+        assertThat(Main.APP_VERSION).isEqualTo("2.0.0");
     }
 }

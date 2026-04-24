@@ -60,7 +60,7 @@ class ExcelMergerIntegrationTest {
     }
 
     @Test
-    void extraccionConservaSus19FilasIncluidaLaDePeticionVacia(@TempDir Path tmp) throws IOException {
+    void hojaCierreConservaSus21FilasIncluidaLaDePeticionVacia(@TempDir Path tmp) throws IOException {
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
 
@@ -68,11 +68,13 @@ class ExcelMergerIntegrationTest {
                 tmp.resolve("output").resolve("resultado.xlsx").toFile());
              Workbook wb = WorkbookFactory.create(fis)) {
 
-            Sheet extraccion = wb.getSheet("Extraccion");
+            // v2.0.0: la hoja con las peticiones del ERP (Peticion, Recurso,
+            // etc.) se llama ahora "Cierre" tras el swap de perfiles.
+            Sheet cierre = wb.getSheet("Cierre");
             // 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 +
             // 1 fila regresion v1.8.0 (responsable MAYUS) +
             // 1 fila regresion v1.8.1 (responsable con padding) + 1 skip = 21
-            assertThat(extraccion.getLastRowNum() + 1).isEqualTo(21);
+            assertThat(cierre.getLastRowNum() + 1).isEqualTo(21);
         }
     }
 
@@ -128,10 +130,12 @@ class ExcelMergerIntegrationTest {
 
             // POI normaliza la formula con referencias por LETRA DE COLUMNA,
             // no por el nombre "Hours". La columna Hours es la P (index 15)
-            // en cierre.xlsx (ahora con Funcion insertada entre Matricula y Account)
-            // y asi queda referenciada.
+            // en la hoja con el export de Jira (Funcion insertada entre
+            // Matricula y Account).
+            // v2.0.0: tras el swap, la hoja con las imputaciones de Jira se
+            // llama "Extraccion" (antes "Cierre").
             assertThat(formula).startsWith("SUMIFS(");
-            assertThat(formula).contains("Cierre");
+            assertThat(formula).contains("Extraccion");
             // La columna Hours es ahora la P (index 15), antes era la O (index 14)
             assertThat(formula).contains("$P:$P");
         }
@@ -141,7 +145,8 @@ class ExcelMergerIntegrationTest {
     void mesColJiraFormulaSumIfsIncluyeCondicionFuncion(@TempDir Path tmp) throws IOException {
         // Tras el cambio 1.3.1, el SUMIFS de Jira añade un tercer par de criterios:
         // Funcion:Funcion. Verificamos que la formula contiene las 4 referencias
-        // a Cierre (1 sum_range + 3 criterios).
+        // a la hoja con el export de Jira (1 sum_range + 3 criterios).
+        // v2.0.0: tras el swap, esa hoja se llama "Extraccion" (antes "Cierre").
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
 
@@ -153,8 +158,9 @@ class ExcelMergerIntegrationTest {
             String formula = mes.getRow(1).getCell(3).getCellFormula();
 
             // SUMIFS(sum_range, crit_range1, crit1, crit_range2, crit2, crit_range3, crit3)
-            // -> 4 referencias "Cierre!..." en total (1 sum + 3 criterios).
-            int count = (formula.length() - formula.replace("Cierre", "").length()) / "Cierre".length();
+            // -> 4 referencias "Extraccion!..." en total (1 sum + 3 criterios).
+            int count = (formula.length() - formula.replace("Extraccion", "").length())
+                    / "Extraccion".length();
             assertThat(count).isEqualTo(4);
         }
     }
@@ -267,11 +273,11 @@ class ExcelMergerIntegrationTest {
     }
 
     @Test
-    void extraccionEnResultadoTienePeticionYRecursoComoStringTrasAsText(@TempDir Path tmp) throws IOException {
+    void cierreEnResultadoTienePeticionYRecursoComoStringTrasAsText(@TempDir Path tmp) throws IOException {
         // Verifica directamente la garantia del fix: las celdas de
-        // Peticion y Recurso en la hoja Extraccion del workbook
-        // resultado son de tipo STRING, aunque en el fixture original
-        // algunas son NUMERIC.
+        // Peticion y Recurso en la hoja que contiene las peticiones
+        // (v2.0.0: llamada "Cierre"; antes era "Extraccion") son de tipo
+        // STRING, aunque en el fixture original algunas son NUMERIC.
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
 
@@ -279,12 +285,12 @@ class ExcelMergerIntegrationTest {
                 tmp.resolve("output").resolve("resultado.xlsx").toFile());
              Workbook wb = WorkbookFactory.create(fis)) {
 
-            Sheet ext = wb.getSheet("Extraccion");
+            Sheet peticiones = wb.getSheet("Cierre");
             // Cabecera en fila 1 (index 0). Las filas de regresion son 16,
             // 17 y 18 (index 15, 16, 17). Peticion=col 0, Recurso=col 11.
             for (int r : new int[] {15, 16, 17}) {
-                org.apache.poi.ss.usermodel.Cell pet = ext.getRow(r).getCell(0);
-                org.apache.poi.ss.usermodel.Cell rec = ext.getRow(r).getCell(11);
+                org.apache.poi.ss.usermodel.Cell pet = peticiones.getRow(r).getCell(0);
+                org.apache.poi.ss.usermodel.Cell rec = peticiones.getRow(r).getCell(11);
                 assertThat(pet.getCellType())
                         .as("Peticion en fila " + (r + 1) + " debe ser STRING tras asText")
                         .isEqualTo(org.apache.poi.ss.usermodel.CellType.STRING);
@@ -294,9 +300,9 @@ class ExcelMergerIntegrationTest {
             }
             // Las filas historicas (texto) deben seguir siendo STRING
             // (no las rompemos accidentalmente al forzar tipo).
-            assertThat(ext.getRow(1).getCell(0).getCellType())
+            assertThat(peticiones.getRow(1).getCell(0).getCellType())
                     .isEqualTo(org.apache.poi.ss.usermodel.CellType.STRING);
-            assertThat(ext.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
+            assertThat(peticiones.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
         }
     }
 
@@ -314,10 +320,13 @@ class ExcelMergerIntegrationTest {
                 tmp.resolve("test-config.properties"), inputDir, outputFile);
         // Reemplazamos la clave por una que mezcla una cabecera real con
         // una inexistente.
+        // v2.0.0: la clave es profile.Cierre.asText.columns (antes
+        // profile.Extraccion.asText.columns), y su valor en test-config
+        // incluye Usuario_Resp_Tecnico desde v1.8.1.
         String content = Files.readString(cfgFile);
         content = content.replace(
-                "profile.Extraccion.asText.columns=Peticion,Recurso",
-                "profile.Extraccion.asText.columns=Peticion,ColumnaQueNoExiste");
+                "profile.Cierre.asText.columns=Peticion,Recurso,Usuario_Resp_Tecnico",
+                "profile.Cierre.asText.columns=Peticion,ColumnaQueNoExiste");
         Files.writeString(cfgFile, content);
 
         ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
@@ -331,8 +340,9 @@ class ExcelMergerIntegrationTest {
     }
 
     // ==================================================================
-    //  Huerfanos (v1.7.0): filas de Resultado para imputaciones de Cierre
-    //  sin contrapartida (Peticion, Recurso) en Extraccion.
+    //  Huerfanos (v1.7.0): filas de Resultado para imputaciones del
+    //  perfil Extraccion sin contrapartida (Peticion, Recurso) en el
+    //  perfil Cierre. v2.0.0: swap de nombres de perfil.
     // ==================================================================
     //
     // Los fixtures incluyen desde v1.7.0 cuatro imputaciones huerfanas:
@@ -604,7 +614,9 @@ class ExcelMergerIntegrationTest {
                 tmp.resolve("test-config.properties"), inputDir, outputFile);
         String content = Files.readString(cfgFile);
         content = content.replace("mes.orphans.enabled=false", "mes.orphans.enabled=true");
-        content = content.replace("mes.orphans.sourceSheet=Cierre",
+        // v2.0.0: tras el swap, mes.orphans.sourceSheet apunta a "Extraccion"
+        // (antes "Cierre") — la hoja con imputaciones de Jira.
+        content = content.replace("mes.orphans.sourceSheet=Extraccion",
                 "mes.orphans.sourceSheet=HojaQueNoExiste");
         Files.writeString(cfgFile, content);
 
@@ -662,10 +674,17 @@ class ExcelMergerIntegrationTest {
         assertThat(report.sheets()).containsEntry("Resultado", 20);
         // Equipos = 1 cabecera + 10 entradas (de test-config.properties)
         assertThat(report.sheets()).containsEntry("Equipos", 11);
-        // Extraccion = 1 cabecera + 14 texto + 3 regresion v1.6.2 +
-        //              1 regresion v1.8.0 + 1 regresion v1.8.1 +
-        //              1 Peticion vacia = 21
-        assertThat(report.sheets()).containsEntry("Extraccion", 21);
+        // v2.0.0: la hoja con las peticiones del ERP (antes "Extraccion")
+        // se llama ahora "Cierre".
+        // Cierre = 1 cabecera + 14 texto + 3 regresion v1.6.2 +
+        //          1 regresion v1.8.0 + 1 regresion v1.8.1 +
+        //          1 Peticion vacia = 21
+        assertThat(report.sheets()).containsEntry("Cierre", 21);
+        // v2.0.0: la hoja con las imputaciones de Jira (antes "Cierre")
+        // se llama ahora "Extraccion".
+        // Extraccion = 1 meta + 1 cabecera + 16 historical + 5 regresion v1.6.2 +
+        //              1 regresion v1.8.1 + 4 huerfanos v1.7.0 = 28
+        assertThat(report.sheets()).containsEntry("Extraccion", 28);
     }
 
     @Test

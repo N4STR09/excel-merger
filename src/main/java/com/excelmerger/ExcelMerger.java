@@ -171,15 +171,20 @@ public class ExcelMerger {
             // 5c. Hojas de lookup (tablas estaticas para VLOOKUP)
             new LookupSheetBuilder(config, report).buildAll(result);
 
-            // 5d. Hoja MES (Extraccion + columnas calculadas)
+            // 5d. Hoja MES (peticiones del perfil Cierre + columnas calculadas).
+            //     v2.0.0: tras el swap, la hoja con las peticiones se llama
+            //     Cierre (antes Extraccion).
             new MesSheetBuilder(config, report).build(result);
 
             // 5e. Hojas derivadas (formulas / agregaciones)
             new DerivedSheetBuilder(config, report).buildAll(result);
 
             // 5f. Hoja "Resumen" (v1.6.0): panel de cierre mensual con
-            //     SUMIFS sobre Resultado y Cierre. Se construye tras MES
-            //     para poder referenciar la hoja Resultado por fórmula.
+            //     SUMIFS sobre Resultado y la hoja del export de Jira.
+            //     Se construye tras MES para poder referenciar la hoja
+            //     Resultado por fórmula.
+            //     v2.0.0: la hoja con las imputaciones de Jira se llama
+            //     Extraccion (antes Cierre).
             new SummarySheetBuilder(config, report).build(result);
 
             // 5g. Hoja de avisos (opt-in con report.inExcel=true). Se construye

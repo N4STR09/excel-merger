@@ -196,18 +196,23 @@ Si `output.backup=true` y el archivo de salida ya existe, antes de sobreescribir
 
 Cada perfil define las cabeceras que deben encontrarse para considerar que un Excel es de ese tipo.
 
+> **v2.0.0 — cambio de nombres de perfil**: hasta la versión 1.8.1, el perfil que detectaba las peticiones del ERP se llamaba `Extraccion`, y el perfil del export de Jira se llamaba `Cierre`. Estos nombres eran contraintuitivos respecto a los nombres habituales de los ficheros de entrada. En 2.0.0 se intercambian: el perfil de peticiones ERP pasa a llamarse `Cierre` y el perfil de Jira pasa a llamarse `Extraccion`. Ver [CHANGELOG 2.0.0](CHANGELOG.md) para la guía de migración de un `config.properties` heredado de 1.x.
+
 ```properties
-profiles=Extraccion,Cierre
+profiles=Cierre,Extraccion
 
-profile.Extraccion.sheetName=Extraccion
-profile.Extraccion.detect.headerRow=1
-profile.Extraccion.detect.headers=Peticion,Titulo,Estado,Recurso
-profile.Extraccion.detect.minMatches=4
-
+# Perfil Cierre: peticiones del ERP, cabeceras en fila 1.
 profile.Cierre.sheetName=Cierre
-profile.Cierre.detect.headerRow=2
-profile.Cierre.detect.headers=Project Key,Issue Key,Hours
-profile.Cierre.detect.minMatches=3
+profile.Cierre.detect.headerRow=1
+profile.Cierre.detect.headers=Peticion,Titulo,Estado,Recurso
+profile.Cierre.detect.minMatches=4
+
+# Perfil Extraccion: export de Jira, cabeceras en fila 2
+# (la 1 suele ser una fila de metadatos/título).
+profile.Extraccion.sheetName=Extraccion
+profile.Extraccion.detect.headerRow=2
+profile.Extraccion.detect.headers=Project Key,Issue Key,Hours
+profile.Extraccion.detect.minMatches=3
 ```
 
 Criterios soportados:
@@ -224,7 +229,7 @@ Al copiar de los Excels origen al workbook resultado, el perfil puede normalizar
 # v1.6.2: columnas que se fuerzan a STRING al copiar (aunque vengan NUMERIC
 # en el origen). Útil para cruces por SUMIFS donde un lado viene numérico
 # y el otro textual: el SUMIFS no casa si los tipos difieren.
-profile.Extraccion.asText.columns=Peticion,Recurso,Usuario_Resp_Tecnico
+profile.Cierre.asText.columns=Peticion,Recurso,Usuario_Resp_Tecnico
 
 # v1.8.1: columnas a las que se aplica trim() tras el cast a STRING. Útil
 # para exports ERP que alinean códigos con padding de espacios
@@ -238,8 +243,8 @@ profile.Extraccion.asText.columns=Peticion,Recurso,Usuario_Resp_Tecnico
 # trim pero no en asText, warning `CONFIG` en runtime y se ignora. Si se
 # declara trim.columns sin ningún asText.columns, error de validación
 # duro.
-profile.Extraccion.trim.columns=Recurso,Usuario_Resp_Tecnico
-profile.Cierre.trim.columns=Matricula
+profile.Cierre.trim.columns=Recurso,Usuario_Resp_Tecnico
+profile.Extraccion.trim.columns=Matricula
 ```
 
 ### Hoja Resultado
@@ -262,7 +267,7 @@ Ejemplo:
 ```properties
 mes.enabled=true
 mes.sheetName=Resultado
-mes.sourceSheet=Extraccion
+mes.sourceSheet=Cierre
 mes.sourceHeaderRow=1
 mes.anchorColumn=Peticion
 
@@ -272,7 +277,7 @@ mes.col.1.from=Peticion
 
 mes.col.9.name=Jira
 mes.col.9.type=SUMIFS
-mes.col.9.from=Cierre
+mes.col.9.from=Extraccion
 mes.col.9.sum=Hours
 mes.col.9.match=Component Name:Peticion,Matricula:Recurso
 

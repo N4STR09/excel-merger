@@ -1,24 +1,34 @@
 """
 Genera los fixtures Excel usados por los tests:
-  - src/test/resources/fixtures/extraccion.xlsx
-  - src/test/resources/fixtures/cierre.xlsx
+  - src/test/resources/fixtures/cierre.xlsx    (peticiones del ERP)
+  - src/test/resources/fixtures/extraccion.xlsx (export de Jira)
 
 Se deja este script para poder regenerar los fixtures si cambian las
 cabeceras esperadas por los perfiles. Los .xlsx resultantes se
 versionan en src/test/resources/fixtures/ junto con los tests.
+
+v2.0.0: los nombres de perfil se intercambiaron respecto a v1.x. Los
+ficheros xlsx se renombran tambien para que el nombre de fichero
+coincida con el nombre del perfil que los detecta por contenido:
+  - cierre.xlsx    contiene cabeceras del perfil Cierre    (peticiones ERP)
+  - extraccion.xlsx contiene cabeceras del perfil Extraccion (export Jira)
 
 Uso (desde la raiz del proyecto):
     pip install openpyxl --break-system-packages
     python3 gen_fixtures.py
 
 v1.6.2: se incorporan 3 filas de regresion para verificar que el SUMIFS
-tolera mismatch de tipo numero/texto entre Extraccion y Cierre.
+tolera mismatch de tipo numero/texto entre los dos perfiles.
 
-v1.8.0: se anade una fila extra en Extraccion con un responsable
-escrito en MAYUSCULAS (TRESP1@x) para validar que la nueva tabla
-"Totales Peticiones por Responsables Matriculas" normaliza
-correctamente (tresp1@x y TRESP1@x cuentan como un unico responsable
-TRESP1@X, y el SUMIFS case-insensitive suma ambas variantes).
+v1.8.0: se anade una fila extra con un responsable escrito en MAYUSCULAS
+(TRESP1@x) para validar que la nueva tabla "Totales Peticiones por
+Responsables Matriculas" normaliza correctamente (tresp1@x y TRESP1@x
+cuentan como un unico responsable TRESP1@X, y el SUMIFS case-insensitive
+suma ambas variantes).
+
+v1.8.1: se anade una fila con Usuario_Resp_Tecnico="MG002   " (padding
+de espacios) para validar que el trim en la capa de copia hace casar
+correctamente el SUMIFS de la segunda tabla de Resumen.
 """
 
 from openpyxl import Workbook
@@ -27,13 +37,14 @@ from openpyxl.cell.cell import WriteOnlyCell  # noqa: F401  (util potencial)
 OUT_DIR = "src/test/resources/fixtures"
 
 # =========================================================================
-# extraccion.xlsx
+# cierre.xlsx — peticiones del ERP
 # =========================================================================
-# Perfil Extraccion (config.properties): cabeceras en fila 1. Debe tener
-# al menos 4 cabeceras de las del profile para que se detecte.
+# Perfil Cierre (v2.0.0; antes Extraccion): cabeceras en fila 1. Debe
+# tener al menos 4 cabeceras de las del profile para que se detecte.
 # 14 filas "historicas" (todas texto) + 3 filas de regresion v1.6.2
-# (Peticion/Recurso como NUMERIC) + 1 skip = 18 filas utiles + 1 header.
-EXTRACCION_HEADERS = [
+# (Peticion/Recurso como NUMERIC) + 1 regresion v1.8.0 + 1 regresion
+# v1.8.1 + 1 skip = 20 filas utiles + 1 header.
+CIERRE_PROFILE_HEADERS = [
     "Peticion", "Titulo", "Aplicaci_Activi", "Estado", "Usuario_Resp_Tecnico",
     "Horas_AutoriTotPeticion", "Horas_RealizadoTot", "Estado_Distribucion",
     "Planificacion", "Objeto_EstudioPeticion", "Codigo_Facturacion",
@@ -41,11 +52,12 @@ EXTRACCION_HEADERS = [
     "Total_Horas_Autorizadas_Recurso", "Total_Horas_Realizadas_Recurso",
 ]
 
-def build_extraccion():
+def build_cierre_profile_fixture():
+    """Genera cierre.xlsx (perfil Cierre v2.0.0 = peticiones ERP)."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Extraccion"
-    ws.append(EXTRACCION_HEADERS)
+    ws.title = "Cierre"
+    ws.append(CIERRE_PROFILE_HEADERS)
 
     # 14 filas validas (texto en Peticion y Recurso)
     rows = [
@@ -70,15 +82,18 @@ def build_extraccion():
     # Filas de regresion v1.6.2 — mismatch de tipos numerico/textual.
     # Peticion y Recurso vienen como NUMERIC aqui, tal y como llegan en
     # el export real del usuario. openpyxl los serializa como numeric.
-    # En Cierre, las imputaciones para estas peticiones/matriculas vienen
-    # como STRING. Sin el fix v1.6.2, el SUMIFS daria 0 para las tres.
+    # En el fichero del perfil Extraccion (v2.0.0; antes perfil Cierre),
+    # las imputaciones para estas peticiones/matriculas vienen como
+    # STRING. Sin el fix v1.6.2, el SUMIFS daria 0 para las tres.
     regression_rows = [
-        # Peticion=55751 (num), Recurso=99642 (num). En Cierre habra una
-        # imputacion con Component Name="55751" (str), Matricula="99642"
-        # (str), Funcion="Dev", Hours=7. Esperado tras fix: Jira=7.
+        # Peticion=55751 (num), Recurso=99642 (num). En el fichero del
+        # perfil Extraccion habra una imputacion con Component Name="55751"
+        # (str), Matricula="99642" (str), Funcion="Dev", Hours=7.
+        # Esperado tras fix: Jira=7.
         [55751, "Regresion num-num", "DF", "Abierta",  "tresp1@x", 50, 7, "OK", "P1", "Obj", "CTR-100", 99642, "Dev", 25, 7, 50, 7],
         # Peticion=101770 (num), Recurso=90014 (num). Dos imputaciones en
-        # Cierre (3 + 2 = 5). Esperado tras fix: Jira=5.
+        # el fichero del perfil Extraccion (3 + 2 = 5). Esperado tras
+        # fix: Jira=5.
         [101770, "Regresion num dobles", "EW", "Abierta",  "tresp2@x", 40, 5, "OK", "P2", "Obj", "CTR-200", 90014, "Dev", 20, 5, 40, 5],
         # Peticion=138074 (num), Recurso=99641 (num). Una imputacion de 9h
         # + una de 4h con Funcion=Sup (filtrada por el tercer criterio).
@@ -95,9 +110,10 @@ def build_extraccion():
     # SUMIFS case-insensitive sumando ambas variantes).
     #
     # Peticion=P-015 (str), Recurso=M-1009 (str), Responsable en MAYUS,
-    # PDCL esperado = Jira*1.2 = 0*1.2 = 0 (no tiene imputacion en
-    # Cierre, asi que solo verifica el agrupamiento). Para verificar
-    # que suma efectivamente, el test usa tresp1@x que si tiene horas.
+    # PDCL esperado = Jira*1.2 = 0*1.2 = 0 (no tiene imputacion en el
+    # fichero del perfil Extraccion, asi que solo verifica el agrupamiento).
+    # Para verificar que suma efectivamente, el test usa tresp1@x que si
+    # tiene horas.
     responsible_case_row = [
         "P-015", "Regresion responsable MAYUS", "DF", "Abierta",
         "TRESP1@x",   # mismo responsable que tresp1@x pero en MAYUS
@@ -115,9 +131,10 @@ def build_extraccion():
     # activo debe sumar correctamente.
     #
     # Peticion=P-016, Recurso=M-1010, Responsable="MG002   " (padding).
-    # Imputacion correspondiente en Cierre: PROJ-40 con Component Name
-    # "P-016", Matricula "M-1010", Funcion "Dev", Hours=5. Esperado tras
-    # el trim: Jira=5, PDCL=6.0. En la tabla por responsable, la celda
+    # Imputacion correspondiente en el fichero del perfil Extraccion:
+    # PROJ-40 con Component Name "P-016", Matricula "M-1010",
+    # Funcion "Dev", Hours=5. Esperado tras el trim: Jira=5, PDCL=6.0.
+    # En la tabla por responsable, la celda
     # ("M-1010", "MG002") debe ser 6.0 (el PDCL, que es la metrica que
     # usa summary.byResponsible).
     responsible_padded_row = [
@@ -129,35 +146,39 @@ def build_extraccion():
     ws.append(responsible_padded_row)
 
     # Ultima fila: Peticion vacia → debe ser saltada por MesSheetBuilder (ancla vacia)
-    skip_row = [""] + ["-"] * (len(EXTRACCION_HEADERS) - 1)
+    skip_row = [""] + ["-"] * (len(CIERRE_PROFILE_HEADERS) - 1)
     ws.append(skip_row)
 
-    wb.save(f"{OUT_DIR}/extraccion.xlsx")
-    print("Generated extraccion.xlsx: 1 header + 14 data + 3 regression v1.6.2 + 1 regression v1.8.0 + 1 regression v1.8.1 + 1 skip = 21 filas")
+    wb.save(f"{OUT_DIR}/cierre.xlsx")
+    print("Generated cierre.xlsx (perfil Cierre v2.0.0 = peticiones ERP): "
+          "1 header + 14 data + 3 regression v1.6.2 + 1 regression v1.8.0 + "
+          "1 regression v1.8.1 + 1 skip = 21 filas")
 
 
 # =========================================================================
-# cierre.xlsx
+# extraccion.xlsx — export de Jira
 # =========================================================================
-# Perfil Cierre (config.properties): cabeceras en fila 2 (la 1 es titulo).
-# 16 imputaciones historicas + 4 imputaciones de regresion v1.6.2 para
-# cruzar con las filas numericas anadidas a Extraccion.
-CIERRE_HEADERS = [
+# Perfil Extraccion (v2.0.0; antes Cierre): cabeceras en fila 2 (la 1 es
+# titulo). 16 imputaciones historicas + 5 imputaciones de regresion v1.6.2/
+# v1.8.1 para cruzar con las filas numericas y las de padding anadidas al
+# perfil Cierre.
+EXTRACCION_PROFILE_HEADERS = [
     "Project Key", "Issue Key", "Aplicación BFA", "Labels",
     "Parent Issue Summary", "Summary", "Description", "Issue Type",
     "Time entry: User", "Time entry: Date", "Component Name",
     "Time entry: Description", "Matricula", "Funcion", "Account", "Hours",
 ]
 
-def build_cierre():
+def build_extraccion_profile_fixture():
+    """Genera extraccion.xlsx (perfil Extraccion v2.0.0 = export Jira)."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Cierre"
+    ws.title = "Extraccion"
 
     # Fila 1: metadata / titulo
-    ws.append(["EXPORT JIRA - Closure Report"] + [None] * (len(CIERRE_HEADERS) - 1))
+    ws.append(["EXPORT JIRA - Closure Report"] + [None] * (len(EXTRACCION_PROFILE_HEADERS) - 1))
     # Fila 2: cabeceras
-    ws.append(CIERRE_HEADERS)
+    ws.append(EXTRACCION_PROFILE_HEADERS)
 
     # 16 filas historicas (texto en todas las columnas). Totales conocidos
     # (Funcion=Dev):
@@ -186,7 +207,7 @@ def build_cierre():
         ws.append(r)
 
     # Filas de regresion v1.6.2 — Component Name y Matricula como STRING,
-    # cruzan con peticiones/recursos NUMERIC en Extraccion:
+    # cruzan con peticiones/recursos NUMERIC del fichero del perfil Cierre:
     #   55751  + 99642 + Dev -> PROJ-20 (7) = 7
     #   101770 + 90014 + Dev -> PROJ-21 (3) + PROJ-22 (2) = 5
     #   138074 + 99641 + Dev -> PROJ-23 (9) = 9   (PROJ-24 con Sup excluido)
@@ -196,23 +217,24 @@ def build_cierre():
         ["PROJ", "PROJ-22", "EW", "reg",  "epic-r2", "sumR3", "desc", "Task", "u2", "2026-02-03", "101770", "tR3", "90014", "Dev", "accR", 2],
         ["PROJ", "PROJ-23", "HE", "reg",  "epic-r3", "sumR4", "desc", "Task", "u3", "2026-02-04", "138074", "tR4", "99641", "Dev", "accR", 9],
         ["PROJ", "PROJ-24", "HE", "reg",  "epic-r3", "sumR5", "desc", "Task", "u3", "2026-02-05", "138074", "tR5", "99641", "Sup", "accR", 4],
-        # v1.8.1: imputacion que cruza con la fila P-016/M-1010 de Extraccion
-        # (cuyo Usuario_Resp_Tecnico viene con padding "MG002   "). Funcion=Dev,
-        # Hours=5. Tras el trim, el SUMIFS de Jira casa -> 5h, y la celda
-        # ("M-1010", "MG002") de la tabla por responsable de Resumen vale PDCL=6.0.
+        # v1.8.1: imputacion que cruza con la fila P-016/M-1010 del fichero
+        # del perfil Cierre (cuyo Usuario_Resp_Tecnico viene con padding
+        # "MG002   "). Funcion=Dev, Hours=5. Tras el trim, el SUMIFS de
+        # Jira casa -> 5h, y la celda ("M-1010", "MG002") de la tabla por
+        # responsable de Resumen vale PDCL=6.0.
         ["PROJ", "PROJ-25", "DF", "pad",  "epic-pad", "sumR6", "desc", "Task", "u8", "2026-02-10", "P-016", "tR6", "M-1010", "Dev", "accR", 5],
     ]
     for r in regression_rows:
         ws.append(r)
 
     # Filas huerfanas v1.7.0 — imputaciones cuya (Component Name, Matricula)
-    # NO casa con ninguna (Peticion, Recurso) de Extraccion. Se usan para
-    # verificar que el builder las incluye en Resultado como filas
-    # adicionales (opt-in mes.orphans.enabled=true).
+    # NO casa con ninguna (Peticion, Recurso) del fichero del perfil Cierre.
+    # Se usan para verificar que el builder las incluye en Resultado como
+    # filas adicionales (opt-in mes.orphans.enabled=true).
     # Totales esperados por pareja (CN, Mat):
     #   (TICKETS, -)            -> 2 imputaciones x 4h = 8h
-    #   (VACACIONES, 90014)     -> 3h   (90014 existe en Extraccion pero asociado a 101770, no a VACACIONES)
-    #   (P-001, MAT-HUERFANO)   -> 1h   (P-001 existe en Extraccion pero solo con M-1001; MAT-HUERFANO no esta asociado)
+    #   (VACACIONES, 90014)     -> 3h   (90014 existe en el fichero Cierre pero asociado a 101770, no a VACACIONES)
+    #   (P-001, MAT-HUERFANO)   -> 1h   (P-001 existe en el fichero Cierre pero solo con M-1001; MAT-HUERFANO no esta asociado)
     orphan_rows = [
         ["PROJ", "PROJ-30", "PF", "huerf", "epic-h1", "sumH1", "desc", "Task", "u4", "2026-02-10", "TICKETS",      "tH1", "-",             "Dev", "accH", 4],
         ["PROJ", "PROJ-31", "PF", "huerf", "epic-h1", "sumH2", "desc", "Task", "u4", "2026-02-11", "TICKETS",      "tH2", "-",             "Dev", "accH", 4],
@@ -222,12 +244,14 @@ def build_cierre():
     for r in orphan_rows:
         ws.append(r)
 
-    wb.save(f"{OUT_DIR}/cierre.xlsx")
-    print("Generated cierre.xlsx: 1 meta + 1 header + 16 historical + 5 regression v1.6.2 + 1 regression v1.8.1 + 4 orphan v1.7.0 = 28 filas")
+    wb.save(f"{OUT_DIR}/extraccion.xlsx")
+    print("Generated extraccion.xlsx (perfil Extraccion v2.0.0 = export Jira): "
+          "1 meta + 1 header + 16 historical + 5 regression v1.6.2 + "
+          "1 regression v1.8.1 + 4 orphan v1.7.0 = 28 filas")
 
 
 if __name__ == "__main__":
     import os
     os.makedirs(OUT_DIR, exist_ok=True)
-    build_extraccion()
-    build_cierre()
+    build_cierre_profile_fixture()
+    build_extraccion_profile_fixture()

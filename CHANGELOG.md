@@ -1,5 +1,96 @@
 # Changelog
 
+## [2.0.0] — BREAKING: swap de nombres de perfil Extraccion ↔ Cierre
+
+Release mayor. Se intercambian los nombres internos de los dos perfiles de detección de ficheros para que coincidan con los nombres habituales de los ficheros de entrada del usuario. Hasta 1.8.1, los nombres internos eran contraintuitivos:
+
+- `EXCEL_CIERRE.xlsx` (fichero del usuario con las peticiones del ERP) era detectado por el perfil llamado **`Extraccion`**.
+- `Extraccion_para_PDCL___DA23.xlsx` (fichero del usuario con el export de Jira) era detectado por el perfil llamado **`Cierre`**.
+
+A partir de 2.0.0 los nombres coinciden:
+
+- El fichero de peticiones del ERP (`EXCEL_CIERRE.xlsx` o similar) → detectado por el perfil **`Cierre`**.
+- El fichero con el export de Jira (`Extraccion_para_PDCL___DA23.xlsx` o similar) → detectado por el perfil **`Extraccion`**.
+
+La detección sigue siendo por contenido (cabeceras, filas de cabecera, valores de celda característicos), así que los ficheros de entrada pueden tener cualquier nombre. El swap es puramente cosmético a nivel de etiqueta de perfil — no cambia ningún comportamiento del pipeline: misma hoja `Resultado`, mismas fórmulas SUMIFS, mismo `Resumen`, mismos huérfanos, mismos warnings. Un `resultado.xlsx` generado con 1.8.1 y uno generado con 2.0.0 contienen los mismos datos; solo cambian dos nombres de hoja.
+
+### Por qué mayor y no patch
+
+Un `config.properties` heredado de 1.x y alimentado a 2.0.0 falla en la validación: las claves `profile.Extraccion.*` y `profile.Cierre.*` del usuario contienen cabeceras que no coinciden con el perfil bajo ese nombre. Un fichero de configuración de cliente sin actualizar es incompatible. Este es el criterio SemVer para mayor: **ruptura de contrato de configuración externa**.
+
+Los `resultado.xlsx` generados cambian dos nombres de hoja (`Extraccion` ↔ `Cierre`). Código o herramientas downstream que referencien estas hojas por nombre exacto (fórmulas en otros libros, scripts de post-proceso) también se rompen — otro criterio de mayor.
+
+### Cambios en config
+
+Swap simétrico de cada par de claves en `config.properties`, `src/main/resources/config.properties` y `src/test/resources/test-config.properties`:
+
+```properties
+# Antes (1.x):                          # Ahora (2.0.0):
+profiles=Extraccion,Cierre              profiles=Cierre,Extraccion
+
+profile.Extraccion.sheetName=...        profile.Cierre.sheetName=...
+profile.Extraccion.detect.headerRow=1   profile.Cierre.detect.headerRow=1
+profile.Extraccion.detect.headers=...   profile.Cierre.detect.headers=...
+profile.Extraccion.asText.columns=...   profile.Cierre.asText.columns=...
+profile.Extraccion.trim.columns=...     profile.Cierre.trim.columns=...
+
+profile.Cierre.sheetName=...            profile.Extraccion.sheetName=...
+profile.Cierre.detect.headerRow=2       profile.Extraccion.detect.headerRow=2
+profile.Cierre.detect.headers=...       profile.Extraccion.detect.headers=...
+profile.Cierre.asText.columns=...       profile.Extraccion.asText.columns=...
+profile.Cierre.trim.columns=Matricula   profile.Extraccion.trim.columns=Matricula
+
+# Referencias cruzadas:
+mes.sourceSheet=Extraccion              mes.sourceSheet=Cierre
+mes.col.9.from=Cierre                   mes.col.9.from=Extraccion
+mes.orphans.sourceSheet=Cierre          mes.orphans.sourceSheet=Extraccion
+```
+
+Los valores de las claves (cabeceras, columnas a trimar, etc.) **no cambian** — solo cambia la etiqueta del perfil que las agrupa.
+
+### Cambios en código
+
+- `MesSheetBuilder`: defaults de dos lecturas de config ajustados al nuevo naming — `config.get("mes.sourceSheet", "Cierre")` (antes `"Extraccion"`) y `config.get("mes.orphans.sourceSheet", "Extraccion")` (antes `"Cierre"`). Solo afectan a configs que omiten estas claves; en la práctica los configs provistos siempre las setean explícitamente.
+- `MesSheetBuilder.RowSource.ofExtraction` → renombrado a `ofCierre`. Método interno (package-private), un único callsite. Semánticamente consistente con el nuevo naming.
+- Javadocs y comentarios de clase actualizados en `ExcelMerger`, `MesSheetBuilder`, `PoiUtils` para reflejar la semántica post-swap.
+- Sin cambios en APIs públicas de builders, exceptiones ni formato del `RunReport`.
+
+### Cambios en fixtures de test
+
+- `src/test/resources/fixtures/extraccion.xlsx` ↔ `src/test/resources/fixtures/cierre.xlsx` **intercambiados físicamente** en disco para que el nombre del fichero coincida con el nombre del perfil que detecta su contenido.
+- `gen_fixtures.py`: funciones `build_extraccion` / `build_cierre` renombradas a `build_cierre_profile_fixture` / `build_extraccion_profile_fixture` (nombres explícitos del perfil que generan). Constantes `EXTRACCION_HEADERS` / `CIERRE_HEADERS` renombradas a `CIERRE_PROFILE_HEADERS` / `EXTRACCION_PROFILE_HEADERS`. Mensajes `print` actualizados.
+
+### Cambios en tests
+
+- `ExcelMergerIntegrationTest`: `extraccionConservaSus19Filas...` renombrado a `hojaCierreConservaSus21Filas...`; `extraccionEnResultadoTienePeticionYRecursoComoString...` renombrado a `cierreEnResultado...`. Las fórmulas SUMIFS de Jira ahora referencian `"Extraccion"` (antes `"Cierre"`). El helper `runReportContabilizaFilasCorrectamente` ahora asserta `containsEntry("Cierre", 21)` + `containsEntry("Extraccion", 28)` (antes solo `Extraccion, 21`).
+- `ConfigValidatorTest`, `FileProfileResolverTest`, `MesSheetBuilderTest`, `RunReportTest`: no modificados. Usan los nombres `"Extraccion"` / `"Cierre"` como meras etiquetas en configs ad-hoc construidos dentro del test. La lógica que prueban no depende de la semántica swapeada.
+
+### Guía de migración para usuarios con `config.properties` heredado de 1.x
+
+Si tienes un `config.properties` personalizado heredado de una instalación 1.x:
+
+1. Intercambia todas las claves `profile.Extraccion.*` ↔ `profile.Cierre.*`. El contenido de cada clave (cabeceras, columnas a textualizar, columnas a trimar) **no cambia**.
+2. Actualiza las tres referencias cruzadas:
+   - `mes.sourceSheet=Extraccion` → `mes.sourceSheet=Cierre`
+   - `mes.col.<N>.from=Cierre` → `mes.col.<N>.from=Extraccion` (donde `<N>` es la columna Jira del SUMIFS)
+   - `mes.orphans.sourceSheet=Cierre` → `mes.orphans.sourceSheet=Extraccion`
+3. Los ficheros Excel de entrada no requieren cambios; la detección por contenido sigue funcionando igual.
+4. Scripts, fórmulas Excel o herramientas downstream que referencien las hojas del `resultado.xlsx` por nombre literal también deben intercambiar las dos referencias.
+
+Una forma rápida de verificar la migración: generar un `resultado.xlsx` con tu config swapeado y abrirlo — debe contener exactamente las mismas hojas que antes (`Resultado`, `Resumen`, `Equipos`, más las dos hojas copiadas) con el mismo contenido en cada una; solo los nombres `Extraccion` / `Cierre` de las dos últimas hojas están intercambiados.
+
+### No cambia
+
+- Semántica del pipeline: misma hoja `Resultado`, mismas fórmulas, mismo `Resumen` con sus dos tablas, mismos huérfanos, mismos warnings.
+- APIs Java públicas del core (ExcelMerger, MesSheetBuilder, SummarySheetBuilder, builders en general).
+- Formato del `RunReport` y de los ficheros de salida.
+- Todos los fixes y features anteriores: v1.6.2 (asText), v1.7.0 (huérfanos), v1.7.1 (recálculo), v1.8.0 (segunda tabla Resumen), v1.8.1 (trim padding). Siguen activos e intactos.
+
+### Cambios de versión
+
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.8.1` a `2.0.0`.
+- `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado con bloque de comentario 2.0.0 explicando el swap.
+
 ## [1.8.1] — Fix: padding de espacios en Usuario_Resp_Tecnico rompía el SUMIFS de Resumen
 
 Patch. Arregla un bug reportado en producción tras el release de 1.8.0: en la segunda tabla de la hoja `Resumen` (matriz Matrícula × Responsable), todas las celdas mostraban `0` excepto la fila del responsable literal `-` (huérfanos). Al pulsar F9 en Excel los valores no cambiaban. El fix de v1.8.0 (`setForceFormulaRecalculation`) había resuelto el problema de recálculo, pero no cubría este segundo fallo, que es de datos y no de engine.

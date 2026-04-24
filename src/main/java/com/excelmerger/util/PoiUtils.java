@@ -84,9 +84,9 @@ public final class PoiUtils {
      *
      * <p>Caso de uso: normalizar columnas que actuan como clave en un
      * {@code SUMIFS} para evitar el mismatch silencioso entre numericos y
-     * textuales (p. ej. {@code 55751} en Extraccion vs {@code "55751"} en
-     * Cierre, que Excel trata como valores distintos cuando el criterio es
-     * numerico).</p>
+     * textuales (p. ej. {@code 55751} en un perfil vs {@code "55751"} en
+     * el otro, que Excel trata como valores distintos cuando el criterio
+     * es numerico).</p>
      *
      * <p>Reglas por tipo de la celda origen:</p>
      * <ul>

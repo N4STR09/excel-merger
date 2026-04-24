@@ -41,7 +41,8 @@ import java.util.regex.Pattern;
  * concreto ({@code COPY}, {@code SUMIFS}, {@code FORMULA}, {@code EMPTY}).
  *
  * <p>Las filas de MES se generan por cada fila de la hoja origen que tenga
- * valor en la "columna ancla" (por defecto, Peticion de Extraccion).</p>
+ * valor en la "columna ancla" (por defecto, Peticion del perfil Cierre —
+ * v2.0.0; antes perfil Extraccion).</p>
  *
  * <p>Responsabilidades restantes de este orquestador:</p>
  * <ul>
@@ -82,7 +83,9 @@ public class MesSheetBuilder {
         }
 
         String mesName = config.get("mes.sheetName", "MES");
-        String sourceName = config.get("mes.sourceSheet", "Extraccion");
+        // v2.0.0: default ajustado a "Cierre" (antes "Extraccion") tras el
+        // swap de nombres de perfil.
+        String sourceName = config.get("mes.sourceSheet", "Cierre");
         int sourceHeaderRow0 = config.getInt("mes.sourceHeaderRow", 1) - 1;
         String anchorHeader = config.get("mes.anchorColumn", "Peticion");
 
@@ -155,11 +158,13 @@ public class MesSheetBuilder {
             cell.setCellStyle(headerStyle);
         }
 
-        // --- Datos: primero recolectamos todas las fuentes de fila (de
-        //     Extraccion y, opcionalmente, huerfanos de Cierre), luego las
-        //     ordenamos, luego las escribimos. Dos pasadas son necesarias
-        //     porque la ordenacion afecta el numero de fila Excel que cada
-        //     formula SUMIFS emite como referencia local. ---
+        // --- Datos: primero recolectamos todas las fuentes de fila (del
+        //     perfil Cierre y, opcionalmente, huerfanos del perfil Extraccion),
+        //     luego las ordenamos, luego las escribimos. Dos pasadas son
+        //     necesarias porque la ordenacion afecta el numero de fila Excel
+        //     que cada formula SUMIFS emite como referencia local.
+        //     v2.0.0: swap de nombres de perfil respecto a 1.x.
+        //     ---
         int sourceLastRow = source.getLastRowNum();
 
         List<RowSource> rowSources = new ArrayList<>();
@@ -168,7 +173,7 @@ public class MesSheetBuilder {
             if (srcRow == null) continue;
             Cell anchorCell = srcRow.getCell(anchorCol0);
             if (PoiUtils.isBlank(anchorCell)) continue;
-            rowSources.add(RowSource.ofExtraction(srcRow, srcR + 1));
+            rowSources.add(RowSource.ofCierre(srcRow, srcR + 1));
         }
 
         boolean orphansEnabled = config.getBoolean("mes.orphans.enabled", false);
@@ -441,17 +446,18 @@ public class MesSheetBuilder {
     }
 
     // =============================================================
-    //  Huerfanos (v1.7.0) — filas de Resultado para imputaciones de
-    //  Cierre cuya (Component Name, Matricula) no tiene fila equivalente
-    //  en Extraccion.(Peticion, Recurso). Ver CHANGELOG 1.7.0.
+    //  Huerfanos (v1.7.0) — filas de Resultado para imputaciones del
+    //  perfil Extraccion cuya (Component Name, Matricula) no tiene fila
+    //  equivalente en Cierre.(Peticion, Recurso). Ver CHANGELOG 1.7.0.
+    //  v2.0.0: swap de nombres de perfil.
     // =============================================================
 
     /**
-     * Fuente de una fila de Resultado. Dos tipos: una fila real de
-     * {@code Extraccion} (con su {@code srcRow} y su numero Excel en
-     * origen), o una fila huerfana derivada de agregar imputaciones de
-     * {@code Cierre} para un par {@code (Component Name, Matricula)}
-     * sin contrapartida.
+     * Fuente de una fila de Resultado. Dos tipos: una fila real del
+     * perfil {@code Cierre} (con su {@code srcRow} y su numero Excel en
+     * origen), o una fila huerfana derivada de agregar imputaciones del
+     * perfil {@code Extraccion} para un par {@code (Component Name,
+     * Matricula)} sin contrapartida.
      *
      * <p>Se usa una clase pequenya con flag {@code orphan} en lugar de
      * una jerarquia {@code sealed} para mantener el diff minimo y evitar
@@ -477,7 +483,7 @@ public class MesSheetBuilder {
             this.orphanHours = orphanHours;
         }
 
-        static RowSource ofExtraction(Row srcRow, int sourceExcelRow) {
+        static RowSource ofCierre(Row srcRow, int sourceExcelRow) {
             return new RowSource(false, srcRow, sourceExcelRow, null, null, 0.0);
         }
 
@@ -501,7 +507,9 @@ public class MesSheetBuilder {
      */
     private List<RowSource> collectOrphans(Workbook workbook, Sheet source,
                                            int sourceHeaderRow0) {
-        String orphanSheetName = config.get("mes.orphans.sourceSheet", "Cierre");
+        // v2.0.0: default ajustado a "Extraccion" (antes "Cierre") tras el
+        // swap de nombres de perfil.
+        String orphanSheetName = config.get("mes.orphans.sourceSheet", "Extraccion");
         String matchCN  = config.get("mes.orphans.matchComponent", "Component Name");
         String matchMat = config.get("mes.orphans.matchMatricula", "Matricula");
         String sumCol   = config.get("mes.orphans.sumColumn", "Hours");
@@ -532,8 +540,9 @@ public class MesSheetBuilder {
             return new ArrayList<>();
         }
 
-        // Set (Peticion, Recurso) existentes en Extraccion, normalizados como
-        // STRING (coherente con el fix 1.6.2: asText.columns=Peticion,Recurso).
+        // Set (Peticion, Recurso) existentes en el perfil Cierre (v2.0.0;
+        // antes Extraccion), normalizados como STRING (coherente con el
+        // fix 1.6.2: asText.columns=Peticion,Recurso).
         Set<String> extKeys = loadExtractionPairKeys(source, sourceHeaderRow0);
 
         // Agrupar por (CN, Mat) sumando Hours.
@@ -567,9 +576,10 @@ public class MesSheetBuilder {
     }
 
     /**
-     * Construye el set de claves {@code "pet|rec"} a partir de las filas de
-     * {@code Extraccion}. Coherente con la normalizacion del fix 1.6.2:
-     * las celdas numericas enteras se serializan sin decimales.
+     * Construye el set de claves {@code "pet|rec"} a partir de las filas
+     * del perfil {@code Cierre} (v2.0.0; antes perfil {@code Extraccion}).
+     * Coherente con la normalizacion del fix 1.6.2: las celdas numericas
+     * enteras se serializan sin decimales.
      */
     private Set<String> loadExtractionPairKeys(Sheet source, int sourceHeaderRow0) {
         Row header = source.getRow(sourceHeaderRow0);
@@ -655,12 +665,12 @@ public class MesSheetBuilder {
      * Matricula (tambien numericas ASC primero, el resto alfabeticas).
      *
      * <p>La clave "numerica" se obtiene de la celda Peticion: para filas
-     * de Extraccion, leyendo la celda ancla; para huerfanos, directamente
-     * {@code orphanPeticion}.</p>
+     * del perfil Cierre, leyendo la celda ancla; para huerfanos,
+     * directamente {@code orphanPeticion}.</p>
      */
     private void sortRowSources(List<RowSource> rowSources) {
         String anchorHeader = config.get("mes.anchorColumn", "Peticion");
-        // Para RowSource de extraccion, necesitamos saber en que columna
+        // Para RowSource no-huerfano, necesitamos saber en que columna
         // de srcRow esta la peticion. La hoja origen tiene un header; lo
         // resolvemos una sola vez.
         Sheet anySource = null;
