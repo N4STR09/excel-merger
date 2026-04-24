@@ -1506,6 +1506,225 @@ class ExcelMergerIntegrationTest {
         }
     }
 
+    // ==================================================================
+    //  v2.2.0 — Tercer fichero opcional de Deuda (columna PDCL + Deuda)
+    // ==================================================================
+
+    /**
+     * Con el fichero de Deuda presente, el libro de salida debe contener
+     * la hoja "Deuda" entre Extraccion y Resultado, la fórmula de
+     * "PDCL + Deuda" debe referenciar la hoja Deuda via SUMIFS y su
+     * valor evaluado debe coincidir con PDCL + horas de deuda cruzadas.
+     *
+     * <p>Filas comprobadas (diseño del fixture deuda.xlsx):</p>
+     * <ul>
+     *   <li>P-001 / M-1001 / Dev: deuda=5+2=7, PDCL+Deuda=PDCL+7.</li>
+     *   <li>P-002 / M-1002 / Dev: deuda=3, PDCL+Deuda=PDCL+3.</li>
+     *   <li>P-007 / M-1001 / Dev: deuda=10, PDCL+Deuda=PDCL+10.</li>
+     *   <li>P-003 / M-1003 / Dev: sin deuda, PDCL+Deuda=PDCL.</li>
+     * </ul>
+     */
+    @Test
+    void deudaFilePresenteSumaHorasEnPdclMasDeuda(@TempDir Path tmp) throws IOException {
+        Path inputDir = tmp.resolve("input");
+        TestFixtures.copyFixturesWithDeudaTo(inputDir);
+        Path output = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(output.getParent());
+        Path cfg = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, output);
+        ConfigLoader cfgLoader = new ConfigLoader(cfg.toString());
+
+        new ExcelMerger(cfgLoader, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(output.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            // La hoja Deuda esta presente en el libro.
+            Sheet deuda = wb.getSheet("Deuda");
+            assertThat(deuda).as("La hoja Deuda debe existir cuando se aporta el fichero").isNotNull();
+
+            // Orden: Cierre, Extraccion, Deuda, Equipos, Resultado, Resumen.
+            // Verificamos que Deuda viene ANTES que Resultado.
+            int idxDeuda = wb.getSheetIndex("Deuda");
+            int idxResultado = wb.getSheetIndex("Resultado");
+            int idxExtraccion = wb.getSheetIndex("Extraccion");
+            assertThat(idxDeuda)
+                    .as("Deuda debe posicionarse entre Extraccion y Resultado")
+                    .isGreaterThan(idxExtraccion)
+                    .isLessThan(idxResultado);
+
+            Sheet resultado = wb.getSheet("Resultado");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            // Indices en test-config: 0=Petición, 3=Jira, 8=PDCL, 9=PDCL+Deuda.
+            assertPdclPlusDeuda(resultado, evaluator, "P-001", 7.0);
+            assertPdclPlusDeuda(resultado, evaluator, "P-002", 3.0);
+            assertPdclPlusDeuda(resultado, evaluator, "P-007", 10.0);
+            // P-003: no hay entrada en Deuda con esa clave -> delta=0
+            assertPdclPlusDeuda(resultado, evaluator, "P-003", 0.0);
+
+            // La formula escrita incluye la rama +IFERROR(SUMIFS(...),0).
+            int rowP001 = findRowByFirstCell(resultado, "P-001");
+            String formula = resultado.getRow(rowP001).getCell(9).getCellFormula();
+            assertThat(formula)
+                    .as("Con Deuda presente, PDCL+Deuda debe incluir +IFERROR(SUMIFS(...),0)")
+                    .contains("+IFERROR(SUMIFS(")
+                    .contains("Deuda!");
+        }
+    }
+
+    /**
+     * Sin el fichero de Deuda, el libro NO tiene hoja Deuda y la fórmula
+     * de "PDCL + Deuda" se degrada silenciosamente a solo {@code {col:PDCL}}
+     * — comportamiento idéntico a v2.1.0. Sin warnings nuevos.
+     */
+    @Test
+    void sinFicheroDeudaComportamientoIdenticoAVersionAnterior(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        RunReport report = new RunReport();
+
+        new ExcelMerger(cfg, report).merge();
+
+        Path output = tmp.resolve("output").resolve("resultado.xlsx");
+        try (FileInputStream fis = new FileInputStream(output.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            assertThat(wb.getSheet("Deuda"))
+                    .as("Sin fichero Deuda, la hoja Deuda NO debe existir en el libro")
+                    .isNull();
+
+            Sheet resultado = wb.getSheet("Resultado");
+            int rowP001 = findRowByFirstCell(resultado, "P-001");
+            String formula = resultado.getRow(rowP001).getCell(9).getCellFormula();
+            assertThat(formula)
+                    .as("Sin Deuda, PDCL+Deuda debe ser una referencia simple a la columna PDCL (sin SUMIFS)")
+                    .doesNotContain("SUMIFS")
+                    .doesNotContain("Deuda!");
+
+            // Valor evaluado: PDCL + Deuda == PDCL.
+            FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
+            double pdcl = ev.evaluate(resultado.getRow(rowP001).getCell(8)).getNumberValue();
+            double pdclPlus = ev.evaluate(resultado.getRow(rowP001).getCell(9)).getNumberValue();
+            assertThat(pdclPlus).isEqualTo(pdcl);
+
+            // No debe aparecer warning nuevo relacionado con Deuda.
+            assertThat(report.warnings())
+                    .as("Sin fichero Deuda no se deben emitir warnings sobre la hoja/cabecera Deuda")
+                    .noneMatch(w -> w.message.contains("Deuda"));
+        }
+    }
+
+    /**
+     * Fila sin match en Deuda: SUMIFS devuelve 0 naturalmente y por tanto
+     * PDCL + Deuda == PDCL. El test verifica P-005 (existe en Cierre pero
+     * no tiene entrada en deuda.xlsx).
+     */
+    @Test
+    void deudaFilePresenteFilaSinMatchDevuelveSoloPdcl(@TempDir Path tmp) throws IOException {
+        Path inputDir = tmp.resolve("input");
+        TestFixtures.copyFixturesWithDeudaTo(inputDir);
+        Path output = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(output.getParent());
+        Path cfg = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, output);
+        ConfigLoader cfgLoader = new ConfigLoader(cfg.toString());
+
+        new ExcelMerger(cfgLoader, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(output.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resultado = wb.getSheet("Resultado");
+            FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
+            assertPdclPlusDeuda(resultado, ev, "P-005", 0.0);
+        }
+    }
+
+    /**
+     * La fila F del fixture de Deuda tiene Matricula="-" para P-010.
+     * En Resultado, P-010 tiene Matricula=M-1006, NO "-". El SUMIFS no
+     * debe casar: delta=0 para esa fila, sin efecto colateral.
+     */
+    @Test
+    void deudaFilePlaceholderMatriculaNoCruza(@TempDir Path tmp) throws IOException {
+        Path inputDir = tmp.resolve("input");
+        TestFixtures.copyFixturesWithDeudaTo(inputDir);
+        Path output = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(output.getParent());
+        Path cfg = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, output);
+        ConfigLoader cfgLoader = new ConfigLoader(cfg.toString());
+
+        new ExcelMerger(cfgLoader, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(output.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resultado = wb.getSheet("Resultado");
+            FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
+            assertPdclPlusDeuda(resultado, ev, "P-010", 0.0);
+        }
+    }
+
+    /**
+     * Verifica que {@code PDCL + Deuda} menos {@code PDCL} para la Peticion
+     * indicada es igual al delta esperado.
+     */
+    private static void assertPdclPlusDeuda(Sheet resultado, FormulaEvaluator ev,
+                                            String peticion, double expectedDelta) {
+        int row = findRowByFirstCell(resultado, peticion);
+        assertThat(row).as("Fila de " + peticion + " en Resultado").isGreaterThanOrEqualTo(0);
+        double pdcl = ev.evaluate(resultado.getRow(row).getCell(8)).getNumberValue();
+        double pdclPlus = ev.evaluate(resultado.getRow(row).getCell(9)).getNumberValue();
+        assertThat(pdclPlus - pdcl)
+                .as("Delta PDCL+Deuda - PDCL para " + peticion)
+                .isEqualTo(expectedDelta);
+    }
+
+    // ==================================================================
+    //  v2.2.0 — Rango [minFiles, maxFiles] y retrocompat strictTwoFiles
+    // ==================================================================
+
+    @Test
+    void strictMinFilesConUnSoloExcelFalla(@TempDir Path tmp) throws IOException {
+        Path inputDir = tmp.resolve("input");
+        Files.createDirectories(inputDir);
+        // Solo copiamos uno de los fixtures
+        TestFixtures.copyFixturesTo(inputDir);
+        Files.delete(inputDir.resolve("extraccion.xlsx"));
+
+        Properties p = new Properties();
+        p.setProperty("input.directory", inputDir.toString());
+        p.setProperty("output.file", tmp.resolve("out.xlsx").toString());
+        p.setProperty("input.strictMinFiles", "2");
+        p.setProperty("input.strictMaxFiles", "3");
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+
+        assertThatThrownBy(() -> new ExcelMerger(cfg, new RunReport()).merge())
+                .isInstanceOf(InputValidationException.class)
+                .hasMessageContaining("Se necesitan al menos 2");
+    }
+
+    /**
+     * Con la clave legada {@code input.strictTwoFiles=true} y 3 ficheros,
+     * la v2.2.0 debe preservar el contrato v2.1.0: abortar con "exactamente 2".
+     */
+    @Test
+    void retrocompatStrictTwoFilesTrueConTresExcelAbortaIgualQueV210(@TempDir Path tmp) throws IOException {
+        Path inputDir = tmp.resolve("input");
+        TestFixtures.copyFixturesWithDeudaTo(inputDir);
+
+        Properties p = new Properties();
+        p.setProperty("input.directory", inputDir.toString());
+        p.setProperty("output.file", tmp.resolve("out.xlsx").toString());
+        p.setProperty("input.strictTwoFiles", "true");
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+
+        assertThatThrownBy(() -> new ExcelMerger(cfg, new RunReport()).merge())
+                .isInstanceOf(InputValidationException.class)
+                .hasMessageContaining("exactamente 2");
+    }
+
     /**
      * Busca la primera fila cuya celda(0) contiene exactamente el texto
      * dado. Devuelve -1 si no se encuentra.

@@ -182,13 +182,19 @@ Todo se define en `config.properties`. Las secciones principales:
 
 ```properties
 input.directory=input
-input.strictTwoFiles=true
+# v2.2.0: rango [min,max] de ficheros Excel aceptados. Reemplaza al
+# obsoleto input.strictTwoFiles. Por defecto admite 2 (Cierre +
+# Extraccion) o 3 (con el fichero opcional de Deuda, ver mas abajo).
+input.strictMinFiles=2
+input.strictMaxFiles=3
 output.file=output/resultado_fusion.xlsx
 output.overwrite=true
 
 # Novedad v1.2.0: backup del output anterior si existe
 output.backup=false
 ```
+
+La clave legada `input.strictTwoFiles` sigue funcionando para compatibilidad (v2.2.0 la lee y mapea automáticamente a `strictMinFiles=2,strictMaxFiles=2`, emitiendo un warning `CONFIG` de deprecación). Si configuras ambas familias, manda la nueva.
 
 Si `output.backup=true` y el archivo de salida ya existe, antes de sobreescribirlo se mueve a `<carpeta del output>/history/<nombre>_yyyy-MM-dd_HHmmss.xlsx` (la carpeta `history` se crea si no existe).
 
@@ -199,7 +205,7 @@ Cada perfil define las cabeceras que deben encontrarse para considerar que un Ex
 > **v2.0.0 — cambio de nombres de perfil**: hasta la versión 1.8.1, el perfil que detectaba las peticiones del ERP se llamaba `Extraccion`, y el perfil del export de Jira se llamaba `Cierre`. Estos nombres eran contraintuitivos respecto a los nombres habituales de los ficheros de entrada. En 2.0.0 se intercambian: el perfil de peticiones ERP pasa a llamarse `Cierre` y el perfil de Jira pasa a llamarse `Extraccion`. Ver [CHANGELOG 2.0.0](CHANGELOG.md) para la guía de migración de un `config.properties` heredado de 1.x.
 
 ```properties
-profiles=Cierre,Extraccion
+profiles=Cierre,Extraccion,Deuda
 
 # Perfil Cierre: peticiones del ERP, cabeceras en fila 1.
 profile.Cierre.sheetName=Cierre
@@ -213,6 +219,12 @@ profile.Extraccion.sheetName=Extraccion
 profile.Extraccion.detect.headerRow=2
 profile.Extraccion.detect.headers=Project Key,Issue Key,Hours
 profile.Extraccion.detect.minMatches=3
+
+# Perfil Deuda (v2.2.0): OPCIONAL. Ver seccion "Archivo de Deuda opcional".
+profile.Deuda.sheetName=Deuda
+profile.Deuda.detect.headerRow=1
+profile.Deuda.detect.headers=Peticion,Matricula,Funcion,Horas
+profile.Deuda.detect.minMatches=4
 ```
 
 Criterios soportados:
@@ -247,6 +259,43 @@ profile.Cierre.trim.columns=Recurso,Usuario_Resp_Tecnico
 profile.Extraccion.trim.columns=Matricula
 ```
 
+### Archivo de Deuda opcional (v2.2.0)
+
+A partir de v2.2.0, el programa acepta un **tercer fichero Excel opcional** en `input/` que aporta horas de deuda por `(Peticion, Matricula, Funcion)`. Cuando está presente, la columna `PDCL + Deuda` de la hoja `Resultado` deja de ser igual a `PDCL` y pasa a sumar las horas cruzadas desde la nueva hoja `Deuda`. Cuando no está, el comportamiento es **idéntico** a v2.1.0 (`PDCL + Deuda == PDCL`, sin warnings).
+
+**Cabeceras esperadas** (fila 1, nombre del fichero irrelevante; detección por contenido):
+
+| `Peticion`    | `Matricula` | `Funcion` | `Horas` |
+|---------------|-------------|-----------|---------|
+| P-001         | M-1001      | Dev       | 5       |
+| P-002         | M-1002      | Dev       | 3       |
+| P-001         | M-1001      | Dev       | 2       |
+
+**Cómo se usa la suma.** La columna `PDCL + Deuda` de `Resultado` se convierte en:
+
+```
+{col:PDCL} + IFERROR(SUMIFS(Deuda[Horas]; Deuda[Peticion]=Resultado[Petición];
+                            Deuda[Matricula]=Resultado[Matrícula];
+                            Deuda[Funcion]=Resultado[Funcion]); 0)
+```
+
+- La **clave de cruce** son las tres columnas `Peticion + Matricula + Funcion`. `Funcion` en el fichero Deuda se cruza contra la columna `Funcion` de `Resultado` (el "rol" `Dev`/`Sup`/...). **No confundir con `Res. Tecnico`** de `Resultado`, que es el nombre del responsable-persona (copiado de `Usuario_Resp_Tecnico` de Cierre) y no se usa como clave de cruce con Deuda.
+- Si una fila de `Resultado` no tiene entrada correspondiente en Deuda, el SUMIFS devuelve 0 y `PDCL + Deuda == PDCL` para esa fila.
+- Varias filas de Deuda con la misma clave se **agregan**: con las filas del ejemplo, la fila P-001/M-1001/Dev de `Resultado` suma `5 + 2 = 7h` de deuda.
+- El `IFERROR(...,0)` es una defensa: si la hoja `Deuda` no existe en el libro (porque el fichero no se aportó), el SUMIFS devuelve `#REF!` y se convierte en 0 — por tanto la fórmula equivale a solo `PDCL`.
+- Las letras de columna de la hoja Deuda (`$A/$B/$C/$D`) se **resuelven en runtime** leyendo la cabecera, no se hardcodean. Si el Excel de Deuda viene con columnas en otro orden o columnas extra intercaladas, la fórmula sigue apuntando a la columna correcta.
+
+**Normalización defensiva.** El perfil Deuda aplica `asText.columns=Peticion,Matricula` y `trim.columns=Matricula`, igual que Cierre y Extraccion, para evitar los mismatches de tipo numérico/textual (v1.6.2) y de padding de espacios (v1.8.1). `Funcion` deliberadamente no se normaliza; si tu fichero de Deuda llega con `"DEV  "` con espacios añade `Funcion` a ambas listas.
+
+**Comportamiento cuando no se aporta el fichero.**
+
+- El libro de salida NO tendrá hoja `Deuda`.
+- La fórmula de `PDCL + Deuda` será solo `={col:PDCL}` (misma que v2.1.0).
+- `PDCL + Deuda == PDCL` para todas las filas → la regla `redIfNotEqualTo=PDCL` no pinta nada de rojo (identidad).
+- **No se emite ningún warning**. El degradado es silencioso por diseño: si tu empresa todavía no usa el fichero de Deuda, los `_Avisos` quedarían contaminados de warnings sin valor.
+
+**Posición en el libro de salida.** `Cierre, Extraccion, [Deuda si existe,] Equipos (oculta), Resultado, Resumen, [_Avisos si opt-in]`. Orden garantizado por `merge.profileOrder` (default `Cierre,Extraccion,Deuda`) independientemente del orden alfabético de los ficheros en `input/`.
+
 ### Hoja Resultado
 
 Estructura fija de columnas definida en el config. Cada columna tiene un tipo:
@@ -254,6 +303,7 @@ Estructura fija de columnas definida en el config. Cada columna tiene un tipo:
 - **COPY** — copia directa de una columna de la hoja origen.
 - **SUMIFS** — suma condicional cruzando con otra hoja.
 - **FORMULA** — fórmula libre con placeholders `{col:NombreColumnaMES}` y `{colLetter:X}`.
+- **FORMULA_PLUS_SUMIFS** (v2.2.0) — fórmula con una parte base `{col:X}` y un SUMIFS opcional que se concatena solo si la hoja remota existe. Se usa para la columna `PDCL + Deuda`. Campos: `baseFormula`, `from`, `sum`, `match` (con la misma sintaxis que `SUMIFS`).
 - **EMPTY** — celda vacía (placeholder).
 
 Modificadores opcionales por columna:

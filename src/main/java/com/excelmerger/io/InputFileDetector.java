@@ -58,29 +58,43 @@ public final class InputFileDetector {
     }
 
     /**
-     * Verifica que haya al menos 2 ficheros; si {@code strictTwo} es true
-     * exige exactamente 2. En caso de mas de 2 con strictTwo=false, anade
-     * un warning CONFIG al {@link RunReport} en lugar de abortar.
+     * Verifica que haya al menos {@code minFiles} ficheros. Si hay mas de
+     * {@code maxFiles}, trunca al primer {@code maxFiles} por orden
+     * alfabetico y emite un warning {@code CONFIG} en el {@link RunReport}.
      *
-     * @throws InputValidationException si no se cumple el requisito.
+     * <p>Devuelve la lista, posiblemente truncada. Los llamadores deben usar
+     * la lista devuelta.</p>
+     *
+     * <p>v2.2.0: sustituye la version anterior con {@code strictTwo}
+     * booleano. La retrocompat con la clave legada
+     * {@code input.strictTwoFiles} se resuelve en el llamador, mapeando
+     * a min/max.</p>
+     *
+     * @throws InputValidationException si {@code files.size() < minFiles}
+     *         o si los parametros son incoherentes.
      */
-    public void validateExcelFiles(List<File> files, boolean strictTwo, RunReport report) {
-        if (files.size() < 2) {
+    public List<File> validateExcelFiles(List<File> files, int minFiles, int maxFiles,
+                                         RunReport report) {
+        if (minFiles < 1 || maxFiles < minFiles) {
+            throw new InputValidationException(
+                    "Configuracion incoherente: input.strictMinFiles=" + minFiles
+                            + ", input.strictMaxFiles=" + maxFiles
+                            + " (se requiere 1 <= min <= max).");
+        }
+        if (files.size() < minFiles) {
             throw new InputValidationException(
                     "Se han encontrado " + files.size() + " archivos Excel en el directorio de entrada. "
-                            + "Se necesitan al menos 2. Archivos detectados: " + joinNames(files));
+                            + "Se necesitan al menos " + minFiles + ". Archivos detectados: " + joinNames(files));
         }
-        if (strictTwo && files.size() > 2) {
-            throw new InputValidationException(
-                    "Se han encontrado " + files.size() + " archivos Excel, pero se esperaban exactamente 2 "
-                            + "(input.strictTwoFiles=true). Archivos detectados: " + joinNames(files));
-        }
-        if (files.size() > 2) {
-            log.warn("Se encontraron {} archivos Excel. Se usaran los 2 primeros por orden alfabetico.",
-                    files.size());
+        if (files.size() > maxFiles) {
+            log.warn("Se encontraron {} archivos Excel, se usaran los {} primeros por orden alfabetico.",
+                    files.size(), maxFiles);
             report.addWarning("CONFIG",
-                    "Se encontraron " + files.size() + " archivos Excel; se usaron los 2 primeros.");
+                    "Se encontraron " + files.size() + " archivos Excel; se usaron los "
+                            + maxFiles + " primeros.");
+            return new java.util.ArrayList<>(files.subList(0, maxFiles));
         }
+        return files;
     }
 
     public static boolean hasExcelExtension(String fileName) {

@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 public class ConfigValidator {
 
     private static final Set<String> VALID_COL_TYPES = new LinkedHashSet<>(
-            Arrays.asList("COPY", "SUMIFS", "FORMULA", "EMPTY"));
+            Arrays.asList("COPY", "SUMIFS", "FORMULA", "FORMULA_PLUS_SUMIFS", "EMPTY"));
     private static final Set<String> VALID_DERIVED_TYPES = new LinkedHashSet<>(
             Arrays.asList("FORMULAS", "AGGREGATION"));
     private static final Set<String> VALID_AGG_FUNCS = new LinkedHashSet<>(
@@ -290,6 +290,34 @@ public class ConfigValidator {
                         errors.add(prefix + "formula: requerido para type=FORMULA ('" + c.name + "').");
                     } else {
                         validateFormulaPlaceholders(prefix, c.name, formula, colNames);
+                    }
+                    break;
+                case "FORMULA_PLUS_SUMIFS":
+                    String baseFormula = config.get(prefix + "baseFormula", "");
+                    if (isBlank(baseFormula)) {
+                        errors.add(prefix + "baseFormula: requerido para type=FORMULA_PLUS_SUMIFS ('"
+                                + c.name + "').");
+                    } else {
+                        validateFormulaPlaceholders(prefix, c.name, baseFormula, colNames);
+                    }
+                    String fpsFromSheet = config.get(prefix + "from", "");
+                    if (isBlank(fpsFromSheet)) {
+                        errors.add(prefix + "from: requerido para type=FORMULA_PLUS_SUMIFS ('"
+                                + c.name + "').");
+                    } else if (!knownSheets.contains(fpsFromSheet)) {
+                        errors.add(prefix + "from: referencia a hoja desconocida '" + fpsFromSheet
+                                + "' ('" + c.name + "'). Hojas conocidas: " + knownSheets + ".");
+                    }
+                    if (isBlank(config.get(prefix + "sum", ""))) {
+                        errors.add(prefix + "sum: requerido para type=FORMULA_PLUS_SUMIFS ('"
+                                + c.name + "').");
+                    }
+                    String fpsMatchRaw = config.get(prefix + "match", "");
+                    if (isBlank(fpsMatchRaw)) {
+                        errors.add(prefix + "match: requerido para type=FORMULA_PLUS_SUMIFS ('"
+                                + c.name + "').");
+                    } else {
+                        validateSumifsMatch(prefix, c.name, fpsMatchRaw);
                     }
                     break;
                 case "EMPTY":

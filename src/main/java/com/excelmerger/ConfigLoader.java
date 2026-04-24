@@ -102,6 +102,15 @@ public class ConfigLoader {
     }
 
     /**
+     * {@code true} si la clave esta presente (aunque su valor sea vacio)
+     * en el fichero de configuracion. Usado para distinguir "clave no
+     * definida" de "clave definida explicitamente con el valor default".
+     */
+    public boolean has(String key) {
+        return properties.getProperty(key) != null;
+    }
+
+    /**
      * Devuelve el objeto Properties subyacente para iterar todas las claves.
      * Usado por componentes que necesitan descubrir propiedades dinamicas
      * (p. ej. sheet.&lt;id&gt;.cell.&lt;CELDA&gt;).

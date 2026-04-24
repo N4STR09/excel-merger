@@ -1,5 +1,92 @@
 # Changelog
 
+## [2.2.0] — Fichero de Deuda opcional (suma real en `PDCL + Deuda`)
+
+Release minor. Añade soporte para un **tercer fichero Excel opcional** en el directorio de entrada que aporta horas de deuda por `(Peticion, Matricula, Funcion)`. Cuando está presente, la columna `PDCL + Deuda` de `Resultado` deja de ser igual a `PDCL` y pasa a sumar las horas cruzadas desde la nueva hoja `Deuda`. Cuando no está, el comportamiento es **idéntico** a v2.1.0: `PDCL + Deuda == PDCL`, sin warnings.
+
+⚠️ **Nota de validación**: esta release se preparó en un entorno sin acceso a Maven Central. `mvnw verify` **no ha sido ejecutado** para certificar la release. Los cambios están validados por: (a) revisión línea a línea de las firmas cambiadas (`InputFileDetector.validateExcelFiles`, `ExcelMerger.mergeSheetsSeparate`); (b) auditoría de los tests existentes que referencian las claves afectadas (`strictTwoFilesTrueAbortaConTresExcel`, `strictTwoFilesFalseConTresExcelTomaLosDosPrimeros`) y su semántica preservada vía el atajo de retrocompat en `ExcelMerger.merge()`; (c) comprobación de que los tests existentes de `PDCL + Deuda` (valor igual a `PDCL` cuando la hoja Deuda no existe) siguen pasando por construcción de la nueva estrategia. Antes de publicar, correr `./mvnw verify` localmente y confirmar tests verdes y cobertura ≥70%.
+
+### Semántica acordada (Fase 0)
+
+Decisiones cerradas con el usuario antes de tocar código:
+
+1. **Detección por contenido**, igual que Cierre y Extraccion. Cabeceras obligatorias: `Peticion`, `Matricula`, `Funcion`, `Horas`. Fila cabecera 1, `minMatches=4`. El fichero NO es obligatorio.
+2. **Clave de cruce** `Resultado ↔ Deuda`: `Peticion + Matricula + Funcion` las tres a la vez. `Funcion` del fichero Deuda se cruza contra la columna `Funcion` de `Resultado` (rol `Dev`/`Sup`/...), **no** contra `Res. Tecnico` (que es el nombre del responsable-persona).
+3. **Posición de la hoja Deuda** en el libro de salida: entre `Extraccion` y `Resultado`. El resto de hojas mantiene su orden (Equipos sigue antes de Resultado por ser lookup; ver punto 2a de Fase 1).
+4. **Fórmula de `PDCL + Deuda` con Deuda presente**: `{col:PDCL}+IFERROR(SUMIFS(Deuda!$D:$D,Deuda!$A:$A,{Petición},Deuda!$B:$B,{Matrícula},Deuda!$C:$C,{Funcion}),0)` con letras de columna **resueltas en runtime** leyendo la cabecera de `Deuda` (no hardcodeadas A/B/C/D). Rangos abiertos `$A:$A`, consistente con `mes.col.10` (Jira), no con `summary.sumifsMaxRow`.
+5. **Fallback sin Deuda**: la fórmula es solo `{col:PDCL}` (idéntica a v2.1.0). Sin warnings.
+6. **Fila sin match**: SUMIFS devuelve 0 naturalmente → `PDCL + Deuda == PDCL` para esa fila. Sin warnings.
+7. **Normalización de tipos (lección 1.7.1)**: `profile.Deuda.asText.columns=Peticion,Matricula` y `profile.Deuda.trim.columns=Matricula`, igual que los otros perfiles. `Funcion` deliberadamente fuera — si aparece con padding (`"DEV  "`) lo añadimos en una patch v2.2.x.
+8. **Rango de ficheros**: opción (a) del plan — `input.strictTwoFiles` reemplazado por `input.strictMinFiles=2` + `input.strictMaxFiles=3`. `strictTwoFiles` queda **deprecated pero leído** con warning CONFIG para no romper despliegues existentes.
+9. **Estrategia de implementación**: opción (X) del plan — nuevo tipo de columna `FORMULA_PLUS_SUMIFS` con campos `baseFormula`/`from`/`sum`/`match`. Letras resueltas en runtime. Alternativa rechazada: dos fórmulas alternativas en properties con letras A/B/C/D fijas (fragil si el Excel de Deuda cambia de estructura).
+
+### Añadido
+
+- **Perfil `Deuda`** en los tres `config.properties` (raíz, `src/main/resources/`, `src/test/resources/test-config.properties`):
+  - `profile.Deuda.sheetName=Deuda`, `detect.headerRow=1`, `detect.headers=Peticion,Matricula,Funcion,Horas`, `detect.minMatches=4`.
+  - `profile.Deuda.asText.columns=Peticion,Matricula` y `trim.columns=Matricula`.
+- **Nuevo tipo de columna MES `FORMULA_PLUS_SUMIFS`** en `FormulaPlusSumIfsColumnStrategy`. Campos obligatorios: `baseFormula`, `from`, `sum`, `match`. Los opcionales `fill` y `redIfNotEqualTo` se heredan de `AbstractMesColumnStrategy`. La estrategia:
+  - En `preValidate`: valida placeholders `{col:X}` contra las columnas MES declaradas; si la hoja `from` existe, valida cabeceras y deshabilita con warning CABECERA si falta alguna; si la hoja no existe, NO deshabilita y NO emite warnings (degradado silencioso por diseño).
+  - En `doWriteCell`: resuelve `{col:X}`/`{colLetter:X}` como `FormulaColumnStrategy`; si la hoja remota no existe escribe solo la base; si existe, concatena `+IFERROR(SUMIFS(...),0)` con letras resueltas dinámicamente.
+- **Claves nuevas** `input.strictMinFiles=2` (default) e `input.strictMaxFiles=3` (default). Reemplazan a `input.strictTwoFiles`.
+- **Retrocompat**: si el usuario tiene `input.strictTwoFiles` y NO tiene las claves nuevas, se mapea automáticamente (`true → [2,2]`, `false → [2,2]` con truncado y warning). Se emite warning CONFIG de deprecación. Si coexisten las tres, manda la nueva y se emite un warning CONFIG adicional de clave ignorada. Un chequeo adicional en `merge()` preserva el contrato "exactamente 2" de v2.1.0 cuando `strictTwoFiles=true` y hay >2 ficheros (aborta con `InputValidationException`).
+- **Fixture `src/test/resources/fixtures/deuda.xlsx`**: 6 filas deliberadamente diseñadas para cubrir (a) match simple, (b) agregación de dos filas con la misma clave (5+2=7h para P-001/M-1001/Dev), (c) match de P-002 y P-007, (d) fila `P-999/M-9999` sin match en Resultado, (e) placeholder `Matricula="-"` que deliberadamente NO cruza (P-010 en Cierre tiene M-1006, no "-"). Documentado en `gen_fixtures.py` para regeneración.
+- **`FormulaPlusSumIfsColumnStrategyTest`** con 7 tests unitarios cubriendo los cuatro escenarios del ciclo de vida (preValidate sin hoja, con hoja OK, con cabecera faltante, placeholder base inválido) y tres escenarios de `writeCell` (sin hoja, con hoja, deshabilitada).
+- **5 tests de integración nuevos** en `ExcelMergerIntegrationTest`:
+  - `deudaFilePresenteSumaHorasEnPdclMasDeuda` — valida posición de la hoja, forma de la fórmula y evaluación numérica (`FormulaEvaluator`) para 4 filas.
+  - `sinFicheroDeudaComportamientoIdenticoAVersionAnterior` — valida que NO existe hoja Deuda, la fórmula no contiene `SUMIFS` ni `Deuda!`, y `PDCL + Deuda == PDCL`.
+  - `deudaFilePresenteFilaSinMatchDevuelveSoloPdcl` — valida P-005 (sin entrada en Deuda) da delta=0.
+  - `deudaFilePlaceholderMatriculaNoCruza` — valida que la fila con `Matricula="-"` del fichero Deuda NO cruza con P-010 (que tiene M-1006).
+  - `strictMinFilesConUnSoloExcelFalla` y `retrocompatStrictTwoFilesTrueConTresExcelAbortaIgualQueV210` — cubren el rango min/max y la retrocompat del `strictTwoFiles=true`.
+- **`TestFixtures.copyFixturesWithDeudaTo(path)`** para tests que necesitan el tercer fichero.
+- **`ConfigLoader.has(key)`** para distinguir "clave ausente" de "clave definida explícitamente con valor default".
+
+### Cambiado
+
+- **`InputFileDetector.validateExcelFiles`**: firma `(List<File>, boolean strictTwo, RunReport)` → `(List<File>, int minFiles, int maxFiles, RunReport)`. Devuelve la lista posiblemente truncada; los llamadores deben usar la lista devuelta. Si `files.size() > maxFiles`, se truncan al primer `maxFiles` por orden alfabético y se emite warning CONFIG.
+- **`ExcelMerger.merge()`**: refactor para soportar 2 o 3 workbooks. La iteración pasa de dos variables locales (`file1`, `file2`) a una lista que se recorre para open/validate/profile/merge. Nuevo método privado `computeProfileOrder()` que reordena los workbooks según `merge.profileOrder` (default `Cierre,Extraccion,Deuda`) antes de copiarlos al libro resultado, garantizando la posición canónica de Deuda entre Extraccion y Resultado independientemente del orden alfabético de los ficheros en disco.
+- **`ExcelMerger.mergeSheetsSeparate`**: firma cambiada a `(List<Workbook>, List<File>, Workbook, List<FileProfile>)`.
+- **`mes.col.13.*` en `config.properties` y `src/main/resources/config.properties`** (y `mes.col.10.*` en `test-config.properties`): pasa de `type=FORMULA` + `formula={col:PDCL}` a `type=FORMULA_PLUS_SUMIFS` + `baseFormula={col:PDCL}` + `from=Deuda` + `sum=Horas` + `match=Peticion:Petición,Matricula:Matrícula,Funcion:Funcion`.
+- **`ConfigValidator`**: añade `FORMULA_PLUS_SUMIFS` a `VALID_COL_TYPES` y validación específica del tipo (`baseFormula` requerido y válido, `from`/`sum`/`match` requeridos, `from` debe ser hoja conocida, `match` con la misma validación que `SUMIFS`).
+- **`profiles=` en los tres `config.properties`** incluye `Deuda` por defecto. Si el usuario no aporta el fichero, el perfil queda declarado pero sin asignar — comportamiento OK porque la validación solo verifica el léxico del config, no la presencia del fichero en disco.
+
+### Obsoleto
+
+- **`input.strictTwoFiles`**: deprecated. Sigue funcionando con el mapping descrito arriba pero emite warning CONFIG cada vez que se carga.
+
+### Mantenido (decisiones no tomadas)
+
+- **Sin clave `deuda.enabled`**. La activación es automática: si el perfil `Deuda` está en `profiles=` y aparece un fichero que casa, se activa. Eliminado para evitar un tercer estado confuso (`enabled=true` sin fichero → ¿qué debe pasar?).
+- **Sin clave `deuda.sumifsMaxRow`**. La fórmula usa rangos abiertos `Deuda!$A:$A`, consistente con `mes.col.10` (Jira). `summary.sumifsMaxRow` sigue siendo específico de la hoja Resumen.
+- **Orden de hojas**: se respeta el orden actual del proyecto (`Cierre, Extraccion, [Deuda,] Equipos(oculta), Resultado, Resumen, [_Avisos]`). `Equipos` permanece antes de `Resultado` por ser lookup construido en `LookupSheetBuilder.buildAll()` (ejecutado antes que `MesSheetBuilder.build()`). Como `Equipos` está oculta, la diferencia con la spec literal (`Equipos` al final) no es visible en la UI de Excel.
+
+### Archivos tocados
+
+- `pom.xml`, `src/main/java/com/excelmerger/Main.java` (bump 2.1.0 → 2.2.0).
+- `src/main/java/com/excelmerger/ConfigLoader.java` (+`has`).
+- `src/main/java/com/excelmerger/ConfigValidator.java` (+`FORMULA_PLUS_SUMIFS`).
+- `src/main/java/com/excelmerger/ExcelMerger.java` (refactor 2→2-o-3).
+- `src/main/java/com/excelmerger/io/InputFileDetector.java` (firma min/max).
+- `src/main/java/com/excelmerger/sheet/column/MesColumnStrategyFactory.java` (+case nuevo).
+- `src/main/java/com/excelmerger/sheet/column/FormulaPlusSumIfsColumnStrategy.java` (nuevo).
+- `config.properties`, `src/main/resources/config.properties`, `src/test/resources/test-config.properties`.
+- `gen_fixtures.py` (+`build_deuda_profile_fixture`).
+- `src/test/resources/fixtures/deuda.xlsx` (nuevo, generado).
+- `src/test/java/com/excelmerger/TestFixtures.java` (+helper).
+- `src/test/java/com/excelmerger/sheet/column/FormulaPlusSumIfsColumnStrategyTest.java` (nuevo).
+- `src/test/java/com/excelmerger/ExcelMergerIntegrationTest.java` (+5 tests).
+- `README.md`, `CHANGELOG.md`, `pom.xml`.
+
+### Lecciones aprendidas
+
+- **Builder vs copia bruta.** La hoja Deuda es una copia directa sin transformaciones; reutilizar `SheetCopier` vía el mecanismo de perfiles que ya gestiona Cierre y Extraccion evita duplicar código. No se crea `DeudaSheetBuilder`: sería un builder que solo delega.
+- **Orden de hojas sin reordering al final.** El orden final del libro se controla solo por el orden de las llamadas en `ExcelMerger.merge()` y el `computeProfileOrder()` que rebaraja los ficheros de entrada a orden canónico antes de copiarlos. No se usa `workbook.setSheetOrder()` final — un reordering a posteriori sería más frágil y obligaría a conocer nombres de hojas que aún no existen al inicio del pipeline.
+- **Degradado silencioso en `FormulaPlusSumIfsColumnStrategy.preValidate`.** El briefing pedía explícitamente "sin warnings" cuando el fichero Deuda no está. La tentación de emitir un warning INFO "Deuda no aportado, PDCL+Deuda se calcula sin suma" fue descartada: con la retrocompat intacta, ese warning aparecería en **todos** los cierres que no usan Deuda (la inmensa mayoría en la mayoría de empresas durante mucho tiempo) y contaminaría `_Avisos` sin aportar valor. La documentación del README es suficiente para saber cómo activar la suma.
+- **Retrocompat de clave booleana → rango.** Mapear `strictTwoFiles=true` a `[2,2]` sin más rompe el contrato original ("exactamente 2 ABORTA con >2"), porque la API nueva trunca en lugar de abortar. Se resolvió con un chequeo explícito anterior a `validateExcelFiles` que preserva el contrato viejo sin contaminar la firma nueva. Alternativa rechazada: añadir un tercer parámetro `boolean exact` a `validateExcelFiles` (sería una API peor para el 99% de los casos).
+- **Hotfix sobre Fase 0 pregunta 5.1: `Funcion` del fichero Deuda se cruza con la columna `Funcion` de Resultado, no con `Res. Tecnico`.** El briefing original describía ambas como "el mismo concepto con distinto nombre"; lo acepté en Fase 0 sin cotejarlo contra `test-config.properties`. Cuando `mvnw verify` arrojó que el delta P-001 era 0 en vez de 7, el diagnóstico fue directo: `Res. Tecnico` en Resultado proviene de `Usuario_Resp_Tecnico` de Cierre (el nombre del responsable, p. ej. `tresp1@x`), mientras que `Funcion` proviene de `Funcion` de Cierre (el rol: `Dev`/`Sup`). `Dev` de Deuda no casa contra `tresp1@x` y el SUMIFS devuelve 0. El fix es una línea en los tres `config.properties` (`Funcion:Res. Tecnico` → `Funcion:Funcion`) más los tests unitarios que codificaban el mapping incorrecto. Lección estructural: cuando el briefing hace una afirmación sobre equivalencia semántica entre columnas, abrir el archivo y leerlo antes de confirmarla en Fase 0, no después del primer fallo de integración.
+
+---
+
 ## [2.1.0] — Columna `Funcion` en la hoja `Resultado`
 
 Release minor. Añade una columna `Funcion` a la hoja `Resultado`, inmediatamente después de `Matrícula`. El valor se copia tal cual desde la columna `Funcion` de la hoja `Cierre`. Cero cambios de código de producción: el builder ya era data-driven y el cambio se resuelve en los tres `config.properties`. Se actualizan los tests que accedían a `Resultado` por índice absoluto y se añade cobertura nueva para la columna.

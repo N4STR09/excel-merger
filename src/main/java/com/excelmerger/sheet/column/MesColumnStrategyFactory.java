@@ -60,6 +60,19 @@ public final class MesColumnStrategyFactory {
                 }
                 return new FormulaColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo, tpl);
             }
+            case "FORMULA_PLUS_SUMIFS": {
+                String baseTpl = config.get(prefix + "baseFormula", null);
+                String fromSheet = config.get(prefix + "from", null);
+                String sumHeader = config.get(prefix + "sum", null);
+                List<String[]> matches = parseMatchExpression(config.get(prefix + "match", ""));
+                if (baseTpl == null || baseTpl.trim().isEmpty()
+                        || fromSheet == null || sumHeader == null || matches.isEmpty()) {
+                    log.info("Columna '{}' (FORMULA_PLUS_SUMIFS) mal configurada. Tratada como EMPTY.", name);
+                    return new EmptyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo);
+                }
+                return new FormulaPlusSumIfsColumnStrategy(name, greenIfPositive, fillColor,
+                        redIfNotEqualTo, baseTpl, fromSheet, sumHeader, matches);
+            }
             case "EMPTY":
                 return new EmptyColumnStrategy(name, greenIfPositive, fillColor, redIfNotEqualTo);
             default:

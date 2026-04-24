@@ -89,6 +89,9 @@ class MainTest {
         // 2.1.0: columna Funcion en Resultado (tras Matricula, copia desde
         //        Cierre.Funcion). Cambio data-driven en config; sin tocar
         //        codigo de produccion.
-        assertThat(Main.APP_VERSION).isEqualTo("2.1.0");
+        // 2.2.0: fichero opcional de Deuda. Nuevo tipo de columna
+        //        FORMULA_PLUS_SUMIFS; retrocompat de input.strictTwoFiles
+        //        via input.strictMinFiles/MaxFiles. Ver CHANGELOG [2.2.0].
+        assertThat(Main.APP_VERSION).isEqualTo("2.2.0");
     }
 }

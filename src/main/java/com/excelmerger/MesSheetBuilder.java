@@ -1,6 +1,7 @@
 package com.excelmerger;
 
 import com.excelmerger.sheet.column.FormulaColumnStrategy;
+import com.excelmerger.sheet.column.FormulaPlusSumIfsColumnStrategy;
 import com.excelmerger.sheet.column.MesColumnStrategy;
 import com.excelmerger.sheet.column.MesColumnStrategyFactory;
 import com.excelmerger.sheet.column.VlookupLink;
@@ -650,13 +651,18 @@ public class MesSheetBuilder {
             target.setCellValue(rs.orphanHours);
             return;
         }
-        if (col instanceof FormulaColumnStrategy) {
-            // Para columnas FORMULA (REAL, PDCL, PDCL+Deuda, Equipo)
-            // dejamos que la estrategia resuelva la formula normalmente:
-            // {col:Jira}*1.2 se convertira en p.ej. "D16*1.2" que
-            // referencia la celda Jira de esta misma fila huerfana. La
-            // implementacion de FormulaColumnStrategy.doWriteCell no lee
-            // srcRow/source, solo necesita workbook, colByName y mesExcelRow.
+        if (col instanceof FormulaColumnStrategy
+                || col instanceof FormulaPlusSumIfsColumnStrategy) {
+            // Para columnas FORMULA y FORMULA_PLUS_SUMIFS (REAL, PDCL,
+            // PDCL+Deuda, Equipo) dejamos que la estrategia resuelva la
+            // formula normalmente: {col:Jira}*1.2 se convertira en p.ej.
+            // "D16*1.2" que referencia la celda Jira de esta misma fila
+            // huerfana. Ni FormulaColumnStrategy.doWriteCell ni
+            // FormulaPlusSumIfsColumnStrategy.doWriteCell leen srcRow/source:
+            // solo necesitan workbook, colByName, mesExcelRow y la hoja de
+            // target. v2.2.0: el segundo tipo se anade aqui para que la
+            // columna PDCL+Deuda se siga evaluando en filas huerfanas igual
+            // que lo hacia v2.1.0 cuando era FORMULA pura.
             col.writeCell(target, null, null, -1, workbook,
                     -1, colByName, mesExcelRow);
             return;

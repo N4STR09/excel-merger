@@ -250,8 +250,90 @@ def build_extraccion_profile_fixture():
           "1 regression v1.8.1 + 4 orphan v1.7.0 = 28 filas")
 
 
+# =========================================================================
+# deuda.xlsx — horas de deuda opcionales (v2.2.0)
+# =========================================================================
+# Perfil Deuda (v2.2.0): fichero OPCIONAL que aporta horas de deuda por
+# (Peticion, Matricula, Funcion). Cabeceras en fila 1. Cuando esta
+# presente, la columna "PDCL + Deuda" de la hoja Resultado suma las
+# horas cruzadas. Cuando no, la columna es identica a "PDCL".
+#
+# Escenarios cubiertos en el fixture (documentados para los tests):
+#
+#   Fila A: (P-001, M-1001, Dev, 5h)
+#     -> cruza con la fila P-001 del fichero Cierre (Matricula=M-1001,
+#        Res. Tecnico=Dev).
+#     -> Fila P-001 en Resultado: PDCL = Jira*1.2, Jira = SUMIFS(...).
+#        PDCL + Deuda = PDCL + 5.
+#
+#   Fila B: (P-002, M-1002, Dev, 3h)
+#     -> cruza con P-002 del fichero Cierre.
+#     -> PDCL + Deuda = PDCL(P-002) + 3.
+#
+#   Fila C: (P-007, M-1001, Dev, 10h)
+#     -> cruza con P-007 (Matricula=M-1001, Res. Tecnico=Dev).
+#     -> PDCL + Deuda = PDCL(P-007) + 10.
+#
+#   Fila D: (P-001, M-1001, Dev, 2h)
+#     -> segunda entrada para la misma clave de la fila A.
+#     -> Total deuda para (P-001, M-1001, Dev) = 5 + 2 = 7h.
+#     -> PDCL + Deuda = PDCL(P-001) + 7.
+#
+#   Fila E: (P-999, M-9999, Dev, 100h)
+#     -> NO casa con ninguna fila de Resultado (peticion inexistente).
+#     -> El SUMIFS no la encuentra desde ninguna fila de Resultado; el
+#        fixture sirve para verificar que las filas sin match en Deuda
+#        devuelven SUMIFS=0 (no afectan al resto).
+#
+#   Fila F: (P-010, -, Dev, 4h)
+#     -> fila con Matricula="-" (placeholder estilo v1.6.1). Aqui la
+#        Peticion P-010 SI existe en Cierre pero con Matricula=M-1006,
+#        no "-". Por tanto en Resultado la fila de P-010 tiene
+#        Matricula=M-1006 y el SUMIFS(Deuda[Matricula="-"]) NO casa.
+#        Sirve como canario: valor=0 para esa fila de Resultado,
+#        confirma que el placeholder no produce un falso match.
+#
+# Totales esperados:
+#   P-001 fila en Resultado -> deuda agregada = 5 + 2 = 7
+#   P-002 fila en Resultado -> deuda agregada = 3
+#   P-007 fila en Resultado -> deuda agregada = 10
+#   resto de filas de Resultado -> deuda agregada = 0
+DEUDA_PROFILE_HEADERS = ["Peticion", "Matricula", "Funcion", "Horas"]
+
+
+def build_deuda_profile_fixture():
+    """Genera deuda.xlsx (perfil Deuda v2.2.0 = horas de deuda opcional)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Deuda"
+    ws.append(DEUDA_PROFILE_HEADERS)
+
+    rows = [
+        # (A) cruza con P-001 / M-1001 / Dev
+        ["P-001", "M-1001", "Dev", 5],
+        # (B) cruza con P-002 / M-1002 / Dev
+        ["P-002", "M-1002", "Dev", 3],
+        # (C) cruza con P-007 / M-1001 / Dev
+        ["P-007", "M-1001", "Dev", 10],
+        # (D) segunda entrada para la misma clave que (A) -> se agrega
+        ["P-001", "M-1001", "Dev", 2],
+        # (E) peticion inexistente en Cierre -> no afecta a Resultado
+        ["P-999", "M-9999", "Dev", 100],
+        # (F) Matricula="-" (placeholder v1.6.1); Peticion P-010 si existe
+        #     en Cierre pero con Matricula=M-1006, no "-". No casa.
+        ["P-010", "-", "Dev", 4],
+    ]
+    for r in rows:
+        ws.append(r)
+
+    wb.save(f"{OUT_DIR}/deuda.xlsx")
+    print("Generated deuda.xlsx (perfil Deuda v2.2.0 = horas de deuda): "
+          "1 header + 6 filas (incluye match multiple, no-match, y placeholder '-').")
+
+
 if __name__ == "__main__":
     import os
     os.makedirs(OUT_DIR, exist_ok=True)
     build_cierre_profile_fixture()
     build_extraccion_profile_fixture()
+    build_deuda_profile_fixture()

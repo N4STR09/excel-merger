@@ -33,6 +33,7 @@ public final class TestFixtures {
 
     public static final String FIXTURE_EXTRACCION = "fixtures/extraccion.xlsx";
     public static final String FIXTURE_CIERRE     = "fixtures/cierre.xlsx";
+    public static final String FIXTURE_DEUDA      = "fixtures/deuda.xlsx";
     public static final String TEST_CONFIG        = "test-config.properties";
 
     private TestFixtures() {
@@ -47,6 +48,16 @@ public final class TestFixtures {
         Files.createDirectories(inputDir);
         copyClasspathResource(FIXTURE_EXTRACCION, inputDir.resolve("extraccion.xlsx"));
         copyClasspathResource(FIXTURE_CIERRE,     inputDir.resolve("cierre.xlsx"));
+        return inputDir;
+    }
+
+    /**
+     * v2.2.0: variante que ademas copia {@code deuda.xlsx}. Util para los
+     * tests que ejercitan la columna "PDCL + Deuda" con suma real de horas.
+     */
+    public static Path copyFixturesWithDeudaTo(Path inputDir) throws IOException {
+        copyFixturesTo(inputDir);
+        copyClasspathResource(FIXTURE_DEUDA, inputDir.resolve("deuda.xlsx"));
         return inputDir;
     }
 
