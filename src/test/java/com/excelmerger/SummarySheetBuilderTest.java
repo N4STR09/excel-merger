@@ -601,18 +601,23 @@ class SummarySheetBuilderTest {
 
     @Test
     void byResponsibleEspaciosEnLosDatosOrigenNoCasanEnSumifs() throws Exception {
-        // Caso limite documentado: si el Excel original trae un responsable
-        // con espacios al principio/final (" Resp01 "), discoverResponsibles
-        // lo normaliza y produce una unica columna "RESP01" en la cabecera
-        // (porque el trim se aplica AL DESCUBRIR). Pero el SUMIFS que
-        // despues emitimos compara "RESP01" contra la celda " Resp01 " de
-        // Resultado, que tiene espacios, y NO casa (SUMIFS es
-        // case-insensitive pero no trim-insensitive).
+        // Caracterizacion del SummarySheetBuilder en aislado: si llegan
+        // al Resultado celdas con padding de espacios (" Resp01 "),
+        // discoverResponsibles lo normaliza y produce una unica columna
+        // "RESP01" en la cabecera (trim AL DESCUBRIR). Pero el SUMIFS
+        // emitido compara "RESP01" contra la celda " Resp01 " de
+        // Resultado y NO casa (SUMIFS es case-insensitive pero no
+        // trim-insensitive).
         //
-        // Este test fija el comportamiento actual para no regresionarlo por
-        // accidente si mañana alguien "arregla" discoverResponsibles. El
-        // arreglo completo requiere trim en la capa de copia de datos,
-        // fuera del alcance de 1.8.0.
+        // En el pipeline real (v1.8.1+) este caso NO ocurre porque el
+        // trim se aplica en la capa de copia via profile.*.trim.columns,
+        // asi que las celdas llegan al Resultado ya sin padding. Pero el
+        // builder en aislado sigue teniendo este comportamiento: si un
+        // cliente construye Resultado saltandose la capa de copia (p. ej.
+        // este test, o un uso futuro de SummarySheetBuilder sobre datos
+        // sin pasar por SheetCopier), el builder no puede inventarse el
+        // trim de celdas que recibe con espacios. Este test fija ese
+        // contrato.
         Workbook wb = new XSSFWorkbook();
         Sheet res = wb.createSheet("Resultado");
         writeRow(res, 0, "Petición", "Matrícula", "Jira", "REAL", "PDCL",

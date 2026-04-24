@@ -70,8 +70,9 @@ class ExcelMergerIntegrationTest {
 
             Sheet extraccion = wb.getSheet("Extraccion");
             // 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 +
-            // 1 fila regresion v1.8.0 (responsable MAYUS) + 1 skip = 20
-            assertThat(extraccion.getLastRowNum() + 1).isEqualTo(20);
+            // 1 fila regresion v1.8.0 (responsable MAYUS) +
+            // 1 fila regresion v1.8.1 (responsable con padding) + 1 skip = 21
+            assertThat(extraccion.getLastRowNum() + 1).isEqualTo(21);
         }
     }
 
@@ -86,8 +87,8 @@ class ExcelMergerIntegrationTest {
 
             Sheet mes = wb.getSheet("Resultado");
             // 1 cabecera + 14 peticiones validas + 3 regresion v1.6.2 +
-            // 1 regresion v1.8.0 (la que tiene Peticion="" se salta)
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(19);
+            // 1 regresion v1.8.0 + 1 regresion v1.8.1 (la que tiene Peticion="" se salta)
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(20);
             // Primera peticion (texto)
             assertThat(mes.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
             // Ultima peticion de las filas "historicas" (index 14 = fila 15)
@@ -105,6 +106,10 @@ class ExcelMergerIntegrationTest {
             // tocar el caso; la normalizacion a MAYUSCULAS es cosa de la
             // tabla por responsable en Resumen, no de Resultado.
             assertThat(mes.getRow(18).getCell(0).getStringCellValue()).isEqualTo("P-015");
+            // Fila de regresion v1.8.1: P-016 con Usuario_Resp_Tecnico="MG002   "
+            // (padding). Tras el trim (profile.Extraccion.trim.columns) la
+            // celda Res. Tecnico de Resultado debe venir ya sin espacios.
+            assertThat(mes.getRow(19).getCell(0).getStringCellValue()).isEqualTo("P-016");
         }
     }
 
@@ -368,9 +373,9 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet mes = wb.getSheet("Resultado");
-            // Antes: 1 cabecera + 14 texto + 3 regresion + 1 regresion v1.8.0 = 19 filas.
-            // Ahora: + 3 huerfanos (TICKETS/-, VACACIONES/90014, P-001/MAT-HUERFANO) = 22.
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(22);
+            // Antes: 1 cabecera + 14 texto + 3 regresion + 1 v1.8.0 + 1 v1.8.1 = 20 filas.
+            // Ahora: + 3 huerfanos (TICKETS/-, VACACIONES/90014, P-001/MAT-HUERFANO) = 23.
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(23);
 
             // Construir mapa (Peticion, Matricula) -> fila para buscar los huerfanos.
             java.util.Map<String, Integer> rowByPair = new java.util.LinkedHashMap<>();
@@ -570,8 +575,8 @@ class ExcelMergerIntegrationTest {
     @Test
     void orphansDisabledMantieneComportamiento16Point2(@TempDir Path tmp) throws IOException {
         // Test de regresion: con enabled=false (default del test-config)
-        // Resultado tiene exactamente 19 filas y nada nuevo.
-        // (1 cabecera + 14 historicas + 3 regresion v1.6.2 + 1 regresion v1.8.0).
+        // Resultado tiene exactamente 20 filas y nada nuevo.
+        // (1 cabecera + 14 historicas + 3 regresion v1.6.2 + 1 v1.8.0 + 1 v1.8.1).
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
 
@@ -580,7 +585,7 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet mes = wb.getSheet("Resultado");
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(19);
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(20);
             // Primera fila de datos sigue siendo P-001 (orden natural de
             // Extraccion, sin reordenar).
             assertThat(mes.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
@@ -609,10 +614,10 @@ class ExcelMergerIntegrationTest {
 
         assertThat(report.warnings()).anyMatch(w ->
                 "HOJA".equals(w.category) && w.message.contains("HojaQueNoExiste"));
-        // Y Resultado sigue teniendo 19 filas (sin huerfanos)
+        // Y Resultado sigue teniendo 20 filas (sin huerfanos)
         try (FileInputStream fis = new FileInputStream(outputFile.toFile());
              Workbook wb = WorkbookFactory.create(fis)) {
-            assertThat(wb.getSheet("Resultado").getLastRowNum() + 1).isEqualTo(19);
+            assertThat(wb.getSheet("Resultado").getLastRowNum() + 1).isEqualTo(20);
         }
     }
 
@@ -653,13 +658,14 @@ class ExcelMergerIntegrationTest {
         new ExcelMerger(cfg, report).merge();
 
         // MES = 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 +
-        //       1 regresion v1.8.0 (P-015) = 19
-        assertThat(report.sheets()).containsEntry("Resultado", 19);
+        //       1 regresion v1.8.0 (P-015) + 1 regresion v1.8.1 (P-016) = 20
+        assertThat(report.sheets()).containsEntry("Resultado", 20);
         // Equipos = 1 cabecera + 10 entradas (de test-config.properties)
         assertThat(report.sheets()).containsEntry("Equipos", 11);
         // Extraccion = 1 cabecera + 14 texto + 3 regresion v1.6.2 +
-        //              1 regresion v1.8.0 + 1 Peticion vacia = 20
-        assertThat(report.sheets()).containsEntry("Extraccion", 20);
+        //              1 regresion v1.8.0 + 1 regresion v1.8.1 +
+        //              1 Peticion vacia = 21
+        assertThat(report.sheets()).containsEntry("Extraccion", 21);
     }
 
     @Test
@@ -1119,15 +1125,19 @@ class ExcelMergerIntegrationTest {
             assertThat(headerRow).isNotNull();
             // Esquina vacia
             assertThat(headerRow.getCell(0).getStringCellValue()).isEmpty();
-            // Los 3 responsables normalizados a MAYUSCULAS (tresp1@x y
-            // TRESP1@x colapsan en TRESP1@X)
-            assertThat(headerRow.getCell(1).getStringCellValue()).isEqualTo("TRESP1@X");
-            assertThat(headerRow.getCell(2).getStringCellValue()).isEqualTo("TRESP2@X");
-            assertThat(headerRow.getCell(3).getStringCellValue()).isEqualTo("TRESP3@X");
+            // 4 responsables normalizados a MAYUSCULAS en orden alfabetico:
+            //   MG002    -> viene con padding "MG002   " (v1.8.1), trim lo limpia
+            //   TRESP1@X -> union de tresp1@x (historicos) y TRESP1@x (v1.8.0)
+            //   TRESP2@X -> tresp2@x (historicos)
+            //   TRESP3@X -> tresp3@x (historicos)
+            assertThat(headerRow.getCell(1).getStringCellValue()).isEqualTo("MG002");
+            assertThat(headerRow.getCell(2).getStringCellValue()).isEqualTo("TRESP1@X");
+            assertThat(headerRow.getCell(3).getStringCellValue()).isEqualTo("TRESP2@X");
+            assertThat(headerRow.getCell(4).getStringCellValue()).isEqualTo("TRESP3@X");
             // Ultima columna: Total
-            assertThat(headerRow.getCell(4).getStringCellValue()).isEqualTo("Total");
-            // No hay 5a columna
-            assertThat(headerRow.getCell(5)).isNull();
+            assertThat(headerRow.getCell(5).getStringCellValue()).isEqualTo("Total");
+            // No hay 6a columna
+            assertThat(headerRow.getCell(6)).isNull();
         }
     }
 
@@ -1254,6 +1264,117 @@ class ExcelMergerIntegrationTest {
                             + "de Resultado, solo que agrupadas distinto.")
                     .isCloseTo(pdclGlobalTabla1,
                             org.assertj.core.data.Offset.offset(1e-6));
+        }
+    }
+
+    // ==================================================================
+    //  v1.8.1 — Trim del padding en Usuario_Resp_Tecnico
+    // ==================================================================
+
+    @Test
+    void trimResponsableConPaddingHaceQueElSumifsDeResumenCasePorResponsable(
+            @TempDir Path tmp) throws IOException {
+        // Regresion v1.8.1 del bug reportado en produccion: el export real
+        // del ERP trae Usuario_Resp_Tecnico con padding de espacios a la
+        // derecha ("MG002   "). Sin el trim en la capa de copia, el SUMIFS
+        // de la segunda tabla de Resumen comparaba la cabecera "MG002"
+        // (normalizada, sin padding) contra la celda "MG002   " de
+        // Resultado (con padding) y no casaba — devolvia 0.
+        //
+        // Con profile.Extraccion.trim.columns=Usuario_Resp_Tecnico activo,
+        // la capa de copia aplica trim() al valor en Resultado, asi que
+        // la celda queda "MG002" y el SUMIFS suma correctamente.
+        //
+        // Este test evalua la formula con FormulaEvaluator (no solo
+        // inspecciona texto) — es precisamente el tipo de test que falto
+        // en 1.8.0 y que permitio que el bug llegara a produccion.
+        //
+        // Fixture v1.8.1: Extraccion tiene P-016/M-1010 con responsable
+        // "MG002   " (3 espacios). Cierre tiene PROJ-25 con
+        // CN="P-016", Mat="M-1010", Funcion="Dev", Hours=5.
+        // Jira esperado = 5, PDCL = 5 * 1.2 = 6.0.
+        // En la matriz por responsable de Resumen, la celda
+        // (M-1010, MG002) debe valer PDCL = 6.0.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            // Primero: verificar que el trim se aplicó. La celda
+            // Res. Tecnico de la fila P-016 en Resultado debe ser "MG002"
+            // exactamente, sin espacios.
+            Sheet resultado = wb.getSheet("Resultado");
+            int p016Row = -1;
+            for (int r = 1; r <= resultado.getLastRowNum(); r++) {
+                Cell c = resultado.getRow(r).getCell(0);
+                if (c != null && c.getCellType() == CellType.STRING
+                        && "P-016".equals(c.getStringCellValue())) {
+                    p016Row = r;
+                    break;
+                }
+            }
+            assertThat(p016Row).as("Fila P-016 debe existir en Resultado").isGreaterThan(0);
+
+            // Res. Tecnico es la col.7 del test-config (no col.8 del config
+            // raíz — el layout es distinto porque test-config compacta
+            // columnas). col.7 -> indice 0-based = 6.
+            Cell resTecnicoCell = resultado.getRow(p016Row).getCell(6);
+            assertThat(resTecnicoCell.getCellType()).isEqualTo(CellType.STRING);
+            assertThat(resTecnicoCell.getStringCellValue())
+                    .as("Tras el trim, Res. Tecnico en Resultado no debe tener padding")
+                    .isEqualTo("MG002");
+
+            // Ahora: ir a Resumen y evaluar la celda (M-1010, MG002) de
+            // la segunda tabla.
+            Sheet resumen = wb.getSheet("Resumen");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            int titleRow0 = findRowByFirstCell(resumen,
+                    "Totales Peticiones por Responsables Matrículas");
+            int headerRow0 = titleRow0 + 2;
+
+            // Buscar indice de columna del responsable MG002
+            Row headerRow = resumen.getRow(headerRow0);
+            int mg002ColIdx = -1;
+            for (int c = 1; c < headerRow.getLastCellNum(); c++) {
+                Cell cell = headerRow.getCell(c);
+                if (cell != null && "MG002".equals(cell.getStringCellValue())) {
+                    mg002ColIdx = c;
+                    break;
+                }
+            }
+            assertThat(mg002ColIdx)
+                    .as("Responsable MG002 (tras el trim) debe aparecer en la cabecera")
+                    .isGreaterThan(0);
+
+            // Buscar fila de la matricula M-1010
+            int mat1010Row = -1;
+            int firstDataRow0 = headerRow0 + 1;
+            for (int r = firstDataRow0; r <= resumen.getLastRowNum(); r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null) continue;
+                if (c0.getCellType() != CellType.STRING) continue;
+                if ("M-1010".equals(c0.getStringCellValue())) {
+                    mat1010Row = r;
+                    break;
+                }
+            }
+            assertThat(mat1010Row)
+                    .as("Matricula M-1010 (la nueva v1.8.1) debe aparecer como fila")
+                    .isGreaterThan(0);
+
+            // Evaluar la celda (M-1010, MG002) y verificar que vale 6.0.
+            // Sin el fix del trim este valor seria 0 (bug reportado).
+            CellValue cellVal = evaluator.evaluate(
+                    resumen.getRow(mat1010Row).getCell(mg002ColIdx));
+            assertThat(cellVal.getNumberValue())
+                    .as("(M-1010, MG002) PDCL = 5 (Jira tras SUMIFS con Funcion=Dev) * 1.2 = 6.0. "
+                            + "Si sale 0, el trim de Usuario_Resp_Tecnico no se aplico y el bug 1.8.1 vuelve.")
+                    .isCloseTo(6.0, org.assertj.core.data.Offset.offset(1e-6));
         }
     }
 

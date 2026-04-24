@@ -216,6 +216,32 @@ Criterios soportados:
 - `detect.cellValue.<REF>` — opcional, fuerza que una celda concreta contenga un valor.
 - `detect.sheetIndex` — opcional, qué hoja analizar (default 0).
 
+#### Normalización al copiar: `asText.columns` y `trim.columns`
+
+Al copiar de los Excels origen al workbook resultado, el perfil puede normalizar columnas concretas. Dos claves opt-in:
+
+```properties
+# v1.6.2: columnas que se fuerzan a STRING al copiar (aunque vengan NUMERIC
+# en el origen). Útil para cruces por SUMIFS donde un lado viene numérico
+# y el otro textual: el SUMIFS no casa si los tipos difieren.
+profile.Extraccion.asText.columns=Peticion,Recurso,Usuario_Resp_Tecnico
+
+# v1.8.1: columnas a las que se aplica trim() tras el cast a STRING. Útil
+# para exports ERP que alinean códigos con padding de espacios
+# ("MG002   "). El SUMIFS de Excel es case-insensitive pero NO
+# trim-insensitive: "MG002" no casa contra "MG002   ". Sin trim, el bug
+# aparece en cualquier hoja aguas abajo que haga SUMIFS contra esta
+# columna (p. ej. la segunda tabla de Resumen).
+#
+# Regla: una columna se trima solo si está también en asText.columns
+# (el trim es una capa sobre la rama STRING del cast). Si se declara en
+# trim pero no en asText, warning `CONFIG` en runtime y se ignora. Si se
+# declara trim.columns sin ningún asText.columns, error de validación
+# duro.
+profile.Extraccion.trim.columns=Recurso,Usuario_Resp_Tecnico
+profile.Cierre.trim.columns=Matricula
+```
+
 ### Hoja Resultado
 
 Estructura fija de columnas definida en el config. Cada columna tiene un tipo:
@@ -347,7 +373,7 @@ Layout generado (ejemplo con 3 matrículas y 3 responsables):
 Puntos clave:
 
 - La fila `Total` sumada por columna y la columna `Total` sumada por fila se cruzan en la esquina inferior derecha con el **gran total**, que debe coincidir con el total `PDCL` de la primera tabla. Si no coinciden hay algo mal en los datos (útil como sanity check al abrir el Excel).
-- Los responsables se normalizan a MAYÚSCULAS (`trim()` + `toUpperCase(Locale.ROOT)`). Códigos como `tresp1@x`, `TRESP1@x` y ` Tresp1@X ` colapsan en una única columna `TRESP1@X`. Excel hace `SUMIFS` case-insensitive sobre texto, así que la suma es correcta para diferencias de capitalización **sin** espacios extra. Límite conocido: `SUMIFS` no es trim-insensitive — si el origen trae ` Tresp1@X ` con espacios al principio/final, la fila aparece en la columna agrupada pero no se suma en ella. En el escenario real pactado los códigos no llevan espacios, así que este límite no afecta; si en el futuro apareciera, habría que trimar en la capa de copia de datos.
+- Los responsables se normalizan a MAYÚSCULAS (`trim()` + `toUpperCase(Locale.ROOT)`) al descubrir los códigos únicos de la columna `Res. Tecnico`. Códigos como `tresp1@x`, `TRESP1@x` y ` Tresp1@X ` colapsan en una única columna `TRESP1@X` de la cabecera. Para que el `SUMIFS` también **sume correctamente** todas esas variantes (no solo las agrupe en la cabecera), los valores del origen tienen que llegar a `Resultado` sin padding de espacios — por eso en 1.8.1 se añadió la clave `profile.*.trim.columns` que aplica `trim()` a la columna `Usuario_Resp_Tecnico` en la capa de copia. Ver la sección "Perfiles — `trim.columns`" más abajo para el detalle. Excel `SUMIFS` es case-insensitive sobre texto, así que la normalización a MAYÚSCULAS en cabecera y la tolerancia de casing en el criterio se complementan.
 - El orden es alfabético puro por el código normalizado.
 - Los ceros se dejan como `0` numérico (la mayoría de celdas lo serán: un responsable típico no toca todas las matrículas).
 

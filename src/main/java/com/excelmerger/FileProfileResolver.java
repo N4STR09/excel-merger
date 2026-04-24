@@ -104,11 +104,13 @@ public class FileProfileResolver {
         final int minMatches;
         final Map<String, String> expectedCellValues;  // ref -> valor esperado
         final List<String> asTextColumns;              // cabeceras a forzar a STRING
+        final List<String> trimColumns;                // cabeceras a trim() tras cast a STRING
 
         private FileProfile(String id, String sheetName, int sheetIndex,
                             int headerRow, List<String> expectedHeaders, int minMatches,
                             Map<String, String> expectedCellValues,
-                            List<String> asTextColumns) {
+                            List<String> asTextColumns,
+                            List<String> trimColumns) {
             this.id = id;
             this.sheetName = sheetName;
             this.sheetIndex = sheetIndex;
@@ -117,6 +119,7 @@ public class FileProfileResolver {
             this.minMatches = minMatches;
             this.expectedCellValues = expectedCellValues;
             this.asTextColumns = asTextColumns;
+            this.trimColumns = trimColumns;
         }
 
         static FileProfile fromConfig(ConfigLoader config, String id) {
@@ -158,8 +161,22 @@ public class FileProfileResolver {
                             .filter(s -> !s.isEmpty())
                             .collect(Collectors.toList());
 
+            // v1.8.1: columnas a las que se aplica trim() despues del cast
+            // a STRING. Solo tiene efecto si la columna esta tambien en
+            // asText.columns (el trim es una capa sobre la rama STRING).
+            // Caso de uso: exports ERP que alinean codigos de texto con
+            // padding de espacios ("MG002   "), que rompen el SUMIFS
+            // (case-insensitive pero no trim-insensitive).
+            String trimRaw = config.get(prefix + "trim.columns", "").trim();
+            List<String> trim = trimRaw.isEmpty()
+                    ? Collections.emptyList()
+                    : Arrays.stream(trimRaw.split(","))
+                            .map(String::trim)
+                            .filter(s -> !s.isEmpty())
+                            .collect(Collectors.toList());
+
             return new FileProfile(id, sheetName, sheetIndex, headerRow,
-                    headers, minMatches, cellValues, asText);
+                    headers, minMatches, cellValues, asText, trim);
         }
 
         /**
@@ -259,6 +276,17 @@ public class FileProfileResolver {
         }
 
         /**
+         * Cabeceras a las que se aplica {@code trim()} despues del cast a
+         * STRING (clave {@code profile.<id>.trim.columns}). Vacio si no se
+         * definio. El trim solo tiene efecto si la columna esta tambien en
+         * {@link #getAsTextColumns()} — el trim es una capa sobre la rama
+         * STRING del cast.
+         */
+        public List<String> getTrimColumns() {
+            return Collections.unmodifiableList(trimColumns);
+        }
+
+        /**
          * Fila (1-indexada) donde estan las cabeceras en la hoja de origen
          * del perfil. Util para que {@code SheetCopier} sepa a partir de que
          * fila se aplican las columnas {@code asText}.
@@ -282,6 +310,30 @@ public class FileProfileResolver {
             }
             Set<Integer> indexes = new HashSet<>();
             for (String col : asTextColumns) {
+                int idx = PoiUtils.findColumnIndex(header, col);
+                if (idx >= 0) {
+                    indexes.add(idx);
+                }
+            }
+            return indexes;
+        }
+
+        /**
+         * Indices 0-based de columnas a las que aplicar {@code trim()} tras
+         * el cast a STRING. Solo las columnas que tambien esten en
+         * {@link #getAsTextColumns()} tienen efecto real (el trim es una
+         * capa sobre la rama STRING del cast).
+         */
+        public Set<Integer> resolveTrimColumnIndexes(Sheet sheet) {
+            if (trimColumns.isEmpty() || sheet == null) {
+                return Collections.emptySet();
+            }
+            Row header = sheet.getRow(headerRow - 1);
+            if (header == null) {
+                return Collections.emptySet();
+            }
+            Set<Integer> indexes = new HashSet<>();
+            for (String col : trimColumns) {
                 int idx = PoiUtils.findColumnIndex(header, col);
                 if (idx >= 0) {
                     indexes.add(idx);

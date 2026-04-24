@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -220,6 +221,7 @@ public class ExcelMerger {
     private void copyAllSheetsFrom(Workbook source, Workbook result,
                                    FileProfileResolver.FileProfile profile, String label) {
         Set<Integer> asTextIdx = resolveAsTextIndexes(source, profile);
+        Set<Integer> trimIdx = resolveTrimIndexes(source, profile);
         int firstDataRow0 = profile == null ? 0 : profile.getHeaderRow();
         int count = source.getNumberOfSheets();
         for (int i = 0; i < count; i++) {
@@ -232,7 +234,7 @@ public class ExcelMerger {
                     && i == profile.sheetIndex
                     && !asTextIdx.isEmpty();
             if (applyAsText) {
-                sheetCopier.copySheet(src, target, result, asTextIdx, firstDataRow0);
+                sheetCopier.copySheet(src, target, result, asTextIdx, trimIdx, firstDataRow0);
             } else {
                 sheetCopier.copySheet(src, target, result);
             }
@@ -280,6 +282,67 @@ public class ExcelMerger {
                                 + mainSrc.getSheetName() + "'; se ignora.");
             }
         }
+    }
+
+    /**
+     * v1.8.1: calcula los indices 0-based de columnas a trim()ar. Emite
+     * warnings para: (a) cabeceras de {@code trim.columns} no encontradas
+     * en la hoja, (b) cabeceras de {@code trim.columns} que NO estan
+     * tambien en {@code asText.columns} (el trim solo aplica a la rama
+     * STRING del cast; sin asText no hay cast, y el trim es no-op).
+     */
+    private Set<Integer> resolveTrimIndexes(Workbook source,
+                                            FileProfileResolver.FileProfile profile) {
+        if (profile == null) {
+            return Collections.emptySet();
+        }
+        List<String> declared = profile.getTrimColumns();
+        if (declared.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Sheet mainSrc = source.getSheetAt(profile.sheetIndex);
+        Set<Integer> resolved = profile.resolveTrimColumnIndexes(mainSrc);
+        if (resolved.size() < declared.size()) {
+            warnMissingTrimHeaders(mainSrc, profile, declared);
+        }
+        // Aviso si una columna esta en trim pero no en asText
+        List<String> asTextDeclared = profile.getAsTextColumns();
+        for (String col : declared) {
+            if (!containsIgnoreCase(asTextDeclared, col)) {
+                report.addWarning("CONFIG",
+                        "Columna '" + col + "' declarada en 'profile."
+                                + profile.getId() + ".trim.columns' pero no en "
+                                + "'asText.columns'; el trim solo aplica a valores "
+                                + "casteados a STRING. Se ignorara para esta columna.");
+            }
+        }
+        // Filtrar a solo las que tambien estan en asText (interseccion real)
+        Set<Integer> asTextResolved = profile.resolveAsTextColumnIndexes(mainSrc);
+        Set<Integer> effective = new HashSet<>(resolved);
+        effective.retainAll(asTextResolved);
+        return effective;
+    }
+
+    private void warnMissingTrimHeaders(Sheet mainSrc,
+                                        FileProfileResolver.FileProfile profile,
+                                        List<String> declared) {
+        Row header = mainSrc.getRow(profile.getHeaderRow() - 1);
+        for (String col : declared) {
+            int idx = header == null ? -1 : PoiUtils.findColumnIndex(header, col);
+            if (idx < 0) {
+                report.addWarning("CABECERA",
+                        "Columna '" + col + "' declarada en 'profile."
+                                + profile.getId() + ".trim.columns' no se encontro en '"
+                                + mainSrc.getSheetName() + "'; se ignora.");
+            }
+        }
+    }
+
+    private static boolean containsIgnoreCase(List<String> list, String value) {
+        for (String s : list) {
+            if (s.equalsIgnoreCase(value)) return true;
+        }
+        return false;
     }
 
     private String resolveTargetName(FileProfileResolver.FileProfile profile,

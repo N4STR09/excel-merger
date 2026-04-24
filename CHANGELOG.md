@@ -1,5 +1,80 @@
 # Changelog
 
+## [1.8.1] — Fix: padding de espacios en Usuario_Resp_Tecnico rompía el SUMIFS de Resumen
+
+Patch. Arregla un bug reportado en producción tras el release de 1.8.0: en la segunda tabla de la hoja `Resumen` (matriz Matrícula × Responsable), todas las celdas mostraban `0` excepto la fila del responsable literal `-` (huérfanos). Al pulsar F9 en Excel los valores no cambiaban. El fix de v1.8.0 (`setForceFormulaRecalculation`) había resuelto el problema de recálculo, pero no cubría este segundo fallo, que es de datos y no de engine.
+
+### Causa raíz
+
+El export ERP que alimenta el perfil `Extraccion` alinea los códigos de `Usuario_Resp_Tecnico` con padding de espacios a la derecha: todos los valores vienen como `"MG002   "`, `"IA03    "`, etc. (los 832/832 analizados). Al copiar estos valores a la hoja `Resultado`, la capa de copia los preservaba tal cual. Después, `SummarySheetBuilder.discoverResponsibles` aplicaba `trim() + toUpperCase()` al descubrir códigos únicos, y emitía la cabecera de la segunda tabla con el valor limpio: `"MG002"`. El SUMIFS resultante comparaba el criterio `"MG002"` (limpio, en cabecera de Resumen) contra el rango `Resultado!H2:H10000` (con padding). **SUMIFS de Excel es case-insensitive en texto pero no trim-insensitive**: `"MG002" ≠ "MG002   "`, el filtro no casaba, el SUMIFS devolvía 0.
+
+La única fila que sumaba correctamente era la del responsable literal `-`, porque ese valor lo escribe el builder directamente (via `mes.orphans.colResTecnico.literal=-`) sin pasar por el export con padding.
+
+En v1.8.0 este caso se había documentado como "límite conocido" en el test `byResponsibleEspaciosEnLosDatosOrigenNoCasanEnSumifs`, asumiendo que los espacios eran un escenario hipotético. Resultó ser el comportamiento estándar del ERP.
+
+### Fix
+
+La solución correcta es normalizar los valores **en la capa de copia** y no en cada consumidor aguas abajo. Nueva clave de configuración opt-in:
+
+```properties
+profile.Extraccion.trim.columns=Recurso,Usuario_Resp_Tecnico
+profile.Cierre.trim.columns=Matricula
+```
+
+Semántica: para cada columna listada, al copiar al workbook resultado se aplica `trim()` al valor tras el cast a STRING. Solo tiene efecto si la columna también está en `asText.columns` (el trim es una capa sobre la rama STRING del cast; sin cast no hay trim posible). Si se declara `trim.columns` sin `asText.columns` el validador aborta con error de config; si una columna individual está en trim pero no en asText, se emite warning `CONFIG` y se ignora.
+
+Las celdas de `Resultado` llegan ahora sin padding, el SUMIFS de la segunda tabla casa correctamente, y cualquier otro consumidor aguas abajo (fórmulas custom, hojas derivadas futuras) se beneficia automáticamente.
+
+### Añadido
+
+- `PoiUtils.copyCellValueAsTextTrimmed(Cell, Cell)` — variante de `copyCellValueAsText` que aplica `trim()` a la rama STRING.
+- `SheetCopier.copySheet` y `copyRow` — sobrecargas que aceptan un segundo set `trimColumnIndexes`. Una columna se trima si está en **ambos** sets (asText y trim).
+- `FileProfile.getTrimColumns()` y `resolveTrimColumnIndexes(Sheet)` — equivalentes a los de `asText`.
+- `ExcelMerger.resolveTrimIndexes` — calcula índices y emite warnings `CABECERA` para columnas no encontradas y `CONFIG` para columnas declaradas en trim pero no en asText (se ignoran silenciosamente en runtime tras el warning).
+- `ConfigValidator` — valida que `trim.columns` no esté declarado sin un `asText.columns` no vacío (error de config duro).
+- `config.properties` (raíz y fallback) y `test-config.properties`: añadidas las claves nuevas. `profile.Extraccion.asText.columns` se amplía para incluir `Usuario_Resp_Tecnico` (necesario para que el trim tenga efecto sobre esa columna).
+
+### Tests
+
+- **9 tests unitarios nuevos** en `PoiUtilsTest` cubriendo todas las ramas de `copyCellValueAsTextTrimmed`: STRING con padding derecha, STRING con espacios al principio y final, STRING sin espacios (no-op), NUMERIC entero, NUMERIC fecha (no se trima ni se castea), BOOLEAN, FORMULA, BLANK, ERROR.
+- **Test de integración crítico** `trimResponsableConPaddingHaceQueElSumifsDeResumenCasePorResponsable` — reproduce el bug con fixture real: añade una fila `P-016 / M-1010 / "MG002   "` en Extracción y una imputación `PROJ-25 / P-016 / M-1010 / Dev / 5h` en Cierre. Verifica primero que tras el pipeline la celda `Res. Tecnico` de `Resultado` para la fila P-016 está sin padding (`"MG002"`, no `"MG002   "`). Luego busca en la segunda tabla de `Resumen` la celda `(M-1010, MG002)` y la evalúa con `FormulaEvaluator`; debe valer `6.0` (PDCL = Jira × 1.2 = 5 × 1.2). Sin el fix, este valor es `0` — exactamente el bug que se reportó. Este test es **el que faltaba en 1.8.0** y cuya ausencia permitió que el bug llegara a producción.
+
+### Fixtures
+
+- `gen_fixtures.py`: fila nueva en `extraccion.xlsx` (P-016 con `Usuario_Resp_Tecnico="MG002   "`, 3 espacios de padding) y fila paralela en `cierre.xlsx` (PROJ-25 casando con P-016/M-1010). Conteos documentados:
+  - `extraccion.xlsx`: 20 → 21 filas.
+  - `cierre.xlsx`: 27 → 28 filas.
+
+### Cambiado
+
+- Tests de integración con asserts de conteo: 5 asserts actualizados (Extraccion 20→21, Resultado sin huérfanos 19→20, Resultado con huérfanos 22→23, asserts en dos tests adicionales).
+- Test de integración v1.8.0 `byResponsiblePipelineGeneraSegundaTablaConTituloCorrecto`: el número de responsables en cabecera pasa de 3 a 4 (MG002 se suma a TRESP1@X/TRESP2@X/TRESP3@X) y el orden alfabético los coloca de forma distinta — assert actualizado.
+- Test `SummarySheetBuilderTest.byResponsibleEspaciosEnLosDatosOrigenNoCasanEnSumifs`: el javadoc pasa de documentar "límite conocido" a documentar el contrato del builder en aislado (el builder no trima, el trim es de la capa de copia). La aserción del test no cambia — sigue siendo cierto que si alguien construye `Resultado` a mano saltándose `SheetCopier`, el builder no puede adivinar el trim.
+
+### Cambios de versión
+
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.8.0` a `1.8.1`.
+- `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado con bloque de comentario 1.8.1.
+
+### No cambia
+
+- Semántica de `asText.columns`: una columna que solo esté en `asText.columns` (no en `trim.columns`) se copia como STRING como antes, sin trim.
+- Primera tabla de `Resumen`, hojas derivadas, avisos, huérfanos: intactos.
+- API pública del builder: las sobrecargas nuevas de `SheetCopier.copySheet` y `copyRow` son adicionales; las firmas anteriores siguen disponibles con el mismo comportamiento.
+
+### Cómo actualizar desde 1.8.0
+
+Si heredas un `config.properties` de 1.8.0 y quieres el fix: añade las dos líneas siguientes y verifica que tus cabeceras aparecen también en `asText.columns`:
+
+```properties
+profile.Extraccion.asText.columns=Peticion,Recurso,Usuario_Resp_Tecnico
+profile.Extraccion.trim.columns=Recurso,Usuario_Resp_Tecnico
+
+profile.Cierre.trim.columns=Matricula
+```
+
+Si no añades estas claves, el comportamiento queda como 1.8.0 (trim inactivo). Es **opt-in puro**, no rompe configs existentes.
+
 ## [1.8.0] — Segunda tabla en Resumen: matriz Matrícula × Responsable
 
 Minor opt-in. La hoja `Resumen` admite ahora una **segunda tabla** que cruza matrículas (filas) con responsables técnicos (columnas), mostrando el `PDCL` de cada par. La primera tabla (sumatorio por matrícula de `Jira, REAL, PDCL, PDCL + Deuda`) se mantiene intacta; la nueva va debajo, separada por filas en blanco configurables. Es opt-in (`summary.byResponsible.enabled=true`) y si no se activa el comportamiento de v1.7.1 queda exactamente igual.

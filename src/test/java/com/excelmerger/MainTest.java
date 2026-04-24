@@ -71,6 +71,13 @@ class MainTest {
         //        configurable). Opt-in via summary.byResponsible.enabled.
         //        Normaliza responsables a MAYUSCULAS para colapsar
         //        variantes de capitalizacion del Excel original.
-        assertThat(Main.APP_VERSION).isEqualTo("1.8.0");
+        // 1.8.1: fix del bug del padding de espacios en Usuario_Resp_Tecnico.
+        //        El export ERP trae los codigos alineados con espacios
+        //        ("MG002   "), que rompian el SUMIFS de la segunda tabla
+        //        de Resumen (case-insensitive pero no trim-insensitive).
+        //        Nueva clave de config profile.<id>.trim.columns aplica
+        //        trim() en la capa de copia; todas las hojas aguas abajo
+        //        consumen valores limpios. Fix via copyCellValueAsTextTrimmed.
+        assertThat(Main.APP_VERSION).isEqualTo("1.8.1");
     }
 }

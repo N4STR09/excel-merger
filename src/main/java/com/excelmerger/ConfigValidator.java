@@ -142,6 +142,23 @@ public class ConfigValidator {
                         + ") es mayor que el numero de cabeceras declaradas ("
                         + headers.size() + ").");
             }
+
+            // v1.8.1: trim.columns solo tiene sentido junto con asText.columns
+            // (el trim es una capa sobre la rama STRING del cast). Si el
+            // usuario declara trim sin asText, es un error de configuracion
+            // puro (nada que trimar). Cada columna suelta de trim que no
+            // este en asText se trata como warning en runtime (ExcelMerger
+            // ya lo emite), pero si la lista entera de asText esta vacia,
+            // es error de config.
+            String trimRaw = config.get(prefix + "trim.columns", "");
+            List<String> trimCols = parseCsv(trimRaw);
+            List<String> asTextCols = parseCsv(config.get(prefix + "asText.columns", ""));
+            if (!trimCols.isEmpty() && asTextCols.isEmpty()) {
+                errors.add(prefix + "trim.columns declarado (" + trimRaw
+                        + ") pero '" + prefix + "asText.columns' vacio. "
+                        + "El trim solo aplica a columnas casteadas a STRING; "
+                        + "sin asText.columns no trima nada.");
+            }
         }
         return sheetNames;
     }

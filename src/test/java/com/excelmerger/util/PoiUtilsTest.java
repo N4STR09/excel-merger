@@ -210,4 +210,179 @@ class PoiUtilsTest {
             throw new RuntimeException(e);
         }
     }
+
+    // ==================================================================
+    //  v1.8.1 — copyCellValueAsTextTrimmed
+    // ==================================================================
+
+    @Test
+    void copyCellValueAsTextTrimmedQuitaEspaciosDeSTRINGConPadding() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setCellValue("MG002   ");   // padding a la derecha, caso real de export ERP
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getCellType()).isEqualTo(CellType.STRING);
+            assertThat(dst.getStringCellValue()).isEqualTo("MG002");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedQuitaEspaciosAlPrincipioYFinal() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setCellValue("  RESP01  ");
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getStringCellValue()).isEqualTo("RESP01");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedNoCambiaSTRINGSinEspacios() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setCellValue("RESP01");
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getStringCellValue()).isEqualTo("RESP01");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedSobreNumericEnteroSerializaSinDecimales() {
+        // Un NUMERIC entero convertido a string nunca lleva espacios, asi
+        // que el trim es no-op. Verificamos que la semantica coincide con
+        // copyCellValueAsText para esta rama.
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setCellValue(55751d);
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getCellType()).isEqualTo(CellType.STRING);
+            assertThat(dst.getStringCellValue()).isEqualTo("55751");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedSobreFechaNoLaFuerzaATexto() {
+        // Misma regla que copyCellValueAsText: una fecha se copia como
+        // fecha, no como texto (evita convertir 2024-04-15 a "45397").
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            CreationHelper ch = wb.getCreationHelper();
+            DataFormat fmt = ch.createDataFormat();
+            CellStyle dateStyle = wb.createCellStyle();
+            dateStyle.setDataFormat(fmt.getFormat("yyyy-mm-dd"));
+
+            Cell src = row.createCell(0);
+            Date date = new Date(1713196800000L);
+            src.setCellValue(date);
+            src.setCellStyle(dateStyle);
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getCellType()).isEqualTo(CellType.NUMERIC);
+            assertThat(dst.getDateCellValue()).isEqualTo(date);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedSobreBooleanSerializaComoTrueFalse() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setCellValue(true);
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getCellType()).isEqualTo(CellType.STRING);
+            assertThat(dst.getStringCellValue()).isEqualTo("true");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedPreservaFormulaSinEvaluar() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setCellFormula("1+1");
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getCellType()).isEqualTo(CellType.FORMULA);
+            assertThat(dst.getCellFormula()).isEqualTo("1+1");
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedSobreBlankDejaCeldaBlank() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setBlank();
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getCellType()).isEqualTo(CellType.BLANK);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void copyCellValueAsTextTrimmedSobreErrorCopiaElError() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("t");
+            Row row = sheet.createRow(0);
+            Cell src = row.createCell(0);
+            src.setCellErrorValue(FormulaError.DIV0.getCode());
+            Cell dst = row.createCell(1);
+
+            PoiUtils.copyCellValueAsTextTrimmed(src, dst);
+
+            assertThat(dst.getCellType()).isEqualTo(CellType.ERROR);
+            assertThat(dst.getErrorCellValue()).isEqualTo(FormulaError.DIV0.getCode());
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }

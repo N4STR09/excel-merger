@@ -62,6 +62,29 @@ public final class SheetCopier {
      */
     public void copySheet(Sheet source, Sheet target, Workbook targetWb,
                           Set<Integer> asTextColumnIndexes, int firstDataRow0) {
+        copySheet(source, target, targetWb, asTextColumnIndexes,
+                Collections.emptySet(), firstDataRow0);
+    }
+
+    /**
+     * Variante v1.8.1 que acepta tambien {@code trimColumnIndexes}: para las
+     * columnas en este segundo set, tras el cast a STRING se aplica
+     * {@link String#trim()} al valor (util cuando el origen viene con
+     * padding de espacios que rompe el criterio del SUMIFS). Una columna
+     * solo se trima si esta en AMBOS sets (asText y trim): el trim es una
+     * capa sobre la rama STRING del cast, no un sustituto.
+     *
+     * @param asTextColumnIndexes indices 0-based de columnas a castear a STRING.
+     * @param trimColumnIndexes   indices 0-based de columnas a trim()ar tras
+     *                            el cast. Se ignoran si no estan tambien en
+     *                            {@code asTextColumnIndexes}.
+     * @param firstDataRow0       primera fila (0-based) a partir de la cual
+     *                            se aplica la transformacion.
+     */
+    public void copySheet(Sheet source, Sheet target, Workbook targetWb,
+                          Set<Integer> asTextColumnIndexes,
+                          Set<Integer> trimColumnIndexes,
+                          int firstDataRow0) {
         Map<Integer, CellStyle> styleCache = new HashMap<>();
 
         for (int r = 0; r <= source.getLastRowNum(); r++) {
@@ -69,9 +92,10 @@ public final class SheetCopier {
             if (sourceRow == null) continue;
             Row targetRow = target.createRow(r);
             targetRow.setHeight(sourceRow.getHeight());
-            boolean applyAsText = r >= firstDataRow0 && !asTextColumnIndexes.isEmpty();
+            boolean applyTransforms = r >= firstDataRow0 && !asTextColumnIndexes.isEmpty();
             copyRow(sourceRow, targetRow, targetWb, styleCache,
-                    applyAsText ? asTextColumnIndexes : Collections.emptySet());
+                    applyTransforms ? asTextColumnIndexes : Collections.emptySet(),
+                    applyTransforms ? trimColumnIndexes : Collections.emptySet());
         }
 
         int maxCols = PoiUtils.countColumns(source);
@@ -101,12 +125,29 @@ public final class SheetCopier {
     public void copyRow(Row sourceRow, Row targetRow, Workbook targetWb,
                         Map<Integer, CellStyle> styleCache,
                         Set<Integer> asTextColumnIndexes) {
+        copyRow(sourceRow, targetRow, targetWb, styleCache,
+                asTextColumnIndexes, Collections.emptySet());
+    }
+
+    /**
+     * Variante v1.8.1 con soporte de trim. Una columna se trima solo si
+     * esta en AMBOS sets (asText y trim): el trim es una capa sobre la
+     * rama STRING del cast.
+     */
+    public void copyRow(Row sourceRow, Row targetRow, Workbook targetWb,
+                        Map<Integer, CellStyle> styleCache,
+                        Set<Integer> asTextColumnIndexes,
+                        Set<Integer> trimColumnIndexes) {
         for (int c = 0; c < sourceRow.getLastCellNum(); c++) {
             Cell sourceCell = sourceRow.getCell(c);
             if (sourceCell == null) continue;
             Cell targetCell = targetRow.createCell(c);
             if (asTextColumnIndexes.contains(c)) {
-                PoiUtils.copyCellValueAsText(sourceCell, targetCell);
+                if (trimColumnIndexes.contains(c)) {
+                    PoiUtils.copyCellValueAsTextTrimmed(sourceCell, targetCell);
+                } else {
+                    PoiUtils.copyCellValueAsText(sourceCell, targetCell);
+                }
             } else {
                 PoiUtils.copyCellValue(sourceCell, targetCell);
             }

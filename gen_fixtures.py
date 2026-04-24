@@ -106,12 +106,34 @@ def build_extraccion():
     ]
     ws.append(responsible_case_row)
 
+    # Fila de regresion v1.8.1 — padding de espacios en el responsable.
+    # El export real del ERP alinea codigos a 8 caracteres con espacios
+    # a la derecha ("MG002   "). Sin el trim en la capa de copia, el
+    # SUMIFS de la segunda tabla de Resumen comparaba "MG002" (criterio
+    # normalizado en la cabecera) contra "MG002   " (celda con padding)
+    # y no casaba — todos los valores salian 0 en Excel real. Con trim
+    # activo debe sumar correctamente.
+    #
+    # Peticion=P-016, Recurso=M-1010, Responsable="MG002   " (padding).
+    # Imputacion correspondiente en Cierre: PROJ-40 con Component Name
+    # "P-016", Matricula "M-1010", Funcion "Dev", Hours=5. Esperado tras
+    # el trim: Jira=5, PDCL=6.0. En la tabla por responsable, la celda
+    # ("M-1010", "MG002") debe ser 6.0 (el PDCL, que es la metrica que
+    # usa summary.byResponsible).
+    responsible_padded_row = [
+        "P-016", "Regresion responsable con padding", "DF", "Abierta",
+        "MG002   ",   # 3 espacios al final — caso real del export ERP
+        20, 5, "OK", "P1", "Obj W", "CTR-100", "M-1010", "Dev",
+        5, 5, 20, 5,
+    ]
+    ws.append(responsible_padded_row)
+
     # Ultima fila: Peticion vacia → debe ser saltada por MesSheetBuilder (ancla vacia)
     skip_row = [""] + ["-"] * (len(EXTRACCION_HEADERS) - 1)
     ws.append(skip_row)
 
     wb.save(f"{OUT_DIR}/extraccion.xlsx")
-    print("Generated extraccion.xlsx: 1 header + 14 data + 3 regression v1.6.2 + 1 regression v1.8.0 + 1 skip = 20 filas")
+    print("Generated extraccion.xlsx: 1 header + 14 data + 3 regression v1.6.2 + 1 regression v1.8.0 + 1 regression v1.8.1 + 1 skip = 21 filas")
 
 
 # =========================================================================
@@ -174,6 +196,11 @@ def build_cierre():
         ["PROJ", "PROJ-22", "EW", "reg",  "epic-r2", "sumR3", "desc", "Task", "u2", "2026-02-03", "101770", "tR3", "90014", "Dev", "accR", 2],
         ["PROJ", "PROJ-23", "HE", "reg",  "epic-r3", "sumR4", "desc", "Task", "u3", "2026-02-04", "138074", "tR4", "99641", "Dev", "accR", 9],
         ["PROJ", "PROJ-24", "HE", "reg",  "epic-r3", "sumR5", "desc", "Task", "u3", "2026-02-05", "138074", "tR5", "99641", "Sup", "accR", 4],
+        # v1.8.1: imputacion que cruza con la fila P-016/M-1010 de Extraccion
+        # (cuyo Usuario_Resp_Tecnico viene con padding "MG002   "). Funcion=Dev,
+        # Hours=5. Tras el trim, el SUMIFS de Jira casa -> 5h, y la celda
+        # ("M-1010", "MG002") de la tabla por responsable de Resumen vale PDCL=6.0.
+        ["PROJ", "PROJ-25", "DF", "pad",  "epic-pad", "sumR6", "desc", "Task", "u8", "2026-02-10", "P-016", "tR6", "M-1010", "Dev", "accR", 5],
     ]
     for r in regression_rows:
         ws.append(r)
@@ -196,7 +223,7 @@ def build_cierre():
         ws.append(r)
 
     wb.save(f"{OUT_DIR}/cierre.xlsx")
-    print("Generated cierre.xlsx: 1 meta + 1 header + 16 historical + 5 regression v1.6.2 + 4 orphan v1.7.0 = 27 filas")
+    print("Generated cierre.xlsx: 1 meta + 1 header + 16 historical + 5 regression v1.6.2 + 1 regression v1.8.1 + 4 orphan v1.7.0 = 28 filas")
 
 
 if __name__ == "__main__":

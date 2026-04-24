@@ -139,9 +139,56 @@ public final class PoiUtils {
     }
 
     /**
-     * {@code true} si la celda es {@code null}, de tipo BLANK, o una cadena
-     * que solo contiene espacios.
+     * Variante de {@link #copyCellValueAsText} que, cuando el valor destino
+     * resulta ser un string, le aplica {@link String#trim()} antes de
+     * escribirlo en la celda destino.
+     *
+     * <p>Caso de uso (v1.8.1): algunos exports ERP alinean valores de texto
+     * con padding de espacios a la derecha (p. ej. {@code "MG002   "}). El
+     * {@code SUMIFS} de Excel es case-insensitive en texto pero <b>no</b> es
+     * trim-insensitive: el criterio {@code "MG002"} no casa contra la celda
+     * {@code "MG002   "} y devuelve 0. Aplicar trim a la columna en la capa
+     * de copia arregla esto para cualquier hoja/fórmula aguas abajo que
+     * consuma ese valor (Resultado, Resumen, fórmulas custom).</p>
+     *
+     * <p>Las celdas no-string (NUMERIC-fecha, BOOLEAN, FORMULA, BLANK, ERROR)
+     * se copian con la misma semántica que {@link #copyCellValueAsText}.
+     * El trim solo aplica a la rama STRING y al resultado de convertir
+     * NUMERIC no-fecha a texto (aunque ese caso ya viene sin espacios; el
+     * trim ahí es defensivo para mantener el contrato uniforme).</p>
      */
+    public static void copyCellValueAsTextTrimmed(Cell source, Cell target) {
+        switch (source.getCellType()) {
+            case STRING:
+                target.setCellValue(source.getStringCellValue().trim());
+                break;
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(source)) {
+                    target.setCellValue(source.getDateCellValue());
+                } else {
+                    double d = source.getNumericCellValue();
+                    String asText = (d == (long) d)
+                            ? String.valueOf((long) d)
+                            : String.valueOf(d);
+                    target.setCellValue(asText.trim());
+                }
+                break;
+            case BOOLEAN:
+                target.setCellValue(String.valueOf(source.getBooleanCellValue()));
+                break;
+            case FORMULA:
+                target.setCellFormula(source.getCellFormula());
+                break;
+            case BLANK:
+                target.setBlank();
+                break;
+            case ERROR:
+                target.setCellErrorValue(source.getErrorCellValue());
+                break;
+            default:
+                target.setCellValue(source.toString().trim());
+        }
+    }
     public static boolean isBlank(Cell cell) {
         if (cell == null) return true;
         switch (cell.getCellType()) {
