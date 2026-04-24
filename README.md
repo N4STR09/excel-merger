@@ -331,6 +331,52 @@ Las matrículas se auto-descubren leyendo la columna clave en `sumSheet`. Se inc
 
 El validador estricto comprueba que `summary.sheetName` no colisione con ninguna otra hoja del libro, que `summary.sumSheet` sea una hoja conocida, y que `summary.valueColumns` no esté vacío. Si alguna columna listada en `valueColumns` no existe en `sumSheet`, no se aborta: se emite un warning `CABECERA` en el `RunReport` y se sigue con las que sí existen.
 
+#### Segunda tabla: matriz Matrícula × Responsable (v1.8.0)
+
+Opcional, opt-in. Añade una **segunda tabla** debajo de la primera, en la misma hoja `Resumen`, cruzando matrículas (filas) con responsables técnicos (columnas) y mostrando el `PDCL` de cada par. Utilidad: la primera tabla responde "¿cuántas horas ha metido cada matrícula?"; la segunda responde "¿qué responsables están imputando en cada matrícula?".
+
+Layout generado (ejemplo con 3 matrículas y 3 responsables):
+
+|              | TRESP1@X | TRESP2@X | TRESP3@X | **Total** |
+|--------------|----------|----------|----------|-----------|
+| **99641**    | 10.8     | 0.0      | 0.0      | **10.8**  |
+| **99642**    | 0.0      | 6.0      | 0.0      | **6.0**   |
+| **-**        | 0.0      | 0.0      | 1.8      | **1.8**   |
+| **Total**    | **10.8** | **6.0**  | **1.8**  | **18.6**  |
+
+Puntos clave:
+
+- La fila `Total` sumada por columna y la columna `Total` sumada por fila se cruzan en la esquina inferior derecha con el **gran total**, que debe coincidir con el total `PDCL` de la primera tabla. Si no coinciden hay algo mal en los datos (útil como sanity check al abrir el Excel).
+- Los responsables se normalizan a MAYÚSCULAS (`trim()` + `toUpperCase(Locale.ROOT)`). Códigos como `tresp1@x`, `TRESP1@x` y ` Tresp1@X ` colapsan en una única columna `TRESP1@X`. Excel hace `SUMIFS` case-insensitive sobre texto, así que la suma es correcta para diferencias de capitalización **sin** espacios extra. Límite conocido: `SUMIFS` no es trim-insensitive — si el origen trae ` Tresp1@X ` con espacios al principio/final, la fila aparece en la columna agrupada pero no se suma en ella. En el escenario real pactado los códigos no llevan espacios, así que este límite no afecta; si en el futuro apareciera, habría que trimar en la capa de copia de datos.
+- El orden es alfabético puro por el código normalizado.
+- Los ceros se dejan como `0` numérico (la mayoría de celdas lo serán: un responsable típico no toca todas las matrículas).
+
+```properties
+# Habilita la segunda tabla (opt-in). Si false o ausente, Resumen queda
+# como en 1.7.1.
+summary.byResponsible.enabled=true
+
+# Columna de Resultado usada como agrupador de columnas.
+# Debe coincidir con uno de los mes.col.N.name.
+summary.byResponsible.column=Res. Tecnico
+
+# Columna de valor a sumar (una sola, no lista).
+# Debe coincidir con uno de los mes.col.N.name.
+summary.byResponsible.valueColumn=PDCL
+
+# Título visible de la segunda tabla (merge sobre el ancho).
+summary.byResponsible.title=Totales Peticiones por Responsables Matrículas
+
+# Número de filas en blanco entre la tabla de matrículas y esta.
+# Admite 0 (tablas pegadas). Default 2.
+summary.byResponsible.gapRows=2
+```
+
+Restricciones:
+
+- `summary.byResponsible.enabled=true` requiere `summary.enabled=true`. Si se configura la segunda tabla sin la primera, el validador aborta con un error explícito (la segunda tabla se renderiza **dentro** de la hoja `Resumen`; no tiene sentido sola).
+- Si la columna configurada en `summary.byResponsible.column` o `summary.byResponsible.valueColumn` no existe en `Resultado`, la segunda tabla se omite con un warning `CABECERA`, pero la primera queda intacta.
+
 ## Robustez y diagnóstico (v1.2.0)
 
 ### Validación estricta del config

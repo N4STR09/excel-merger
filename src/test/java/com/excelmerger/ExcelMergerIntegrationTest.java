@@ -3,6 +3,8 @@ package com.excelmerger;
 import com.excelmerger.exception.InputValidationException;
 import com.excelmerger.exception.OutputException;
 
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.CellValue;
 import org.apache.poi.ss.usermodel.FormulaEvaluator;
 import org.apache.poi.ss.usermodel.Row;
@@ -67,8 +69,9 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet extraccion = wb.getSheet("Extraccion");
-            // 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 + 1 skip = 19
-            assertThat(extraccion.getLastRowNum() + 1).isEqualTo(19);
+            // 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 +
+            // 1 fila regresion v1.8.0 (responsable MAYUS) + 1 skip = 20
+            assertThat(extraccion.getLastRowNum() + 1).isEqualTo(20);
         }
     }
 
@@ -82,9 +85,9 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet mes = wb.getSheet("Resultado");
-            // 1 cabecera + 14 peticiones validas + 3 regresion v1.6.2 (la que
-            // tiene Peticion="" se salta)
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(18);
+            // 1 cabecera + 14 peticiones validas + 3 regresion v1.6.2 +
+            // 1 regresion v1.8.0 (la que tiene Peticion="" se salta)
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(19);
             // Primera peticion (texto)
             assertThat(mes.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
             // Ultima peticion de las filas "historicas" (index 14 = fila 15)
@@ -97,6 +100,11 @@ class ExcelMergerIntegrationTest {
             // (tambien STRING) y recupera las horas.
             assertThat(mes.getRow(15).getCell(0).getStringCellValue()).isEqualTo("55751");
             assertThat(mes.getRow(17).getCell(0).getStringCellValue()).isEqualTo("138074");
+            // Fila de regresion v1.8.0: P-015 con responsable en MAYUSCULAS
+            // (TRESP1@x). Verifica que el pipeline la copia tal cual, sin
+            // tocar el caso; la normalizacion a MAYUSCULAS es cosa de la
+            // tabla por responsable en Resumen, no de Resultado.
+            assertThat(mes.getRow(18).getCell(0).getStringCellValue()).isEqualTo("P-015");
         }
     }
 
@@ -360,9 +368,9 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet mes = wb.getSheet("Resultado");
-            // Antes: 1 cabecera + 14 texto + 3 regresion = 18 filas.
-            // Ahora: + 3 huerfanos (TICKETS/-, VACACIONES/90014, P-001/MAT-HUERFANO) = 21.
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(21);
+            // Antes: 1 cabecera + 14 texto + 3 regresion + 1 regresion v1.8.0 = 19 filas.
+            // Ahora: + 3 huerfanos (TICKETS/-, VACACIONES/90014, P-001/MAT-HUERFANO) = 22.
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(22);
 
             // Construir mapa (Peticion, Matricula) -> fila para buscar los huerfanos.
             java.util.Map<String, Integer> rowByPair = new java.util.LinkedHashMap<>();
@@ -562,7 +570,8 @@ class ExcelMergerIntegrationTest {
     @Test
     void orphansDisabledMantieneComportamiento16Point2(@TempDir Path tmp) throws IOException {
         // Test de regresion: con enabled=false (default del test-config)
-        // Resultado tiene exactamente 18 filas y nada nuevo.
+        // Resultado tiene exactamente 19 filas y nada nuevo.
+        // (1 cabecera + 14 historicas + 3 regresion v1.6.2 + 1 regresion v1.8.0).
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
 
@@ -571,7 +580,7 @@ class ExcelMergerIntegrationTest {
              Workbook wb = WorkbookFactory.create(fis)) {
 
             Sheet mes = wb.getSheet("Resultado");
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(18);
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(19);
             // Primera fila de datos sigue siendo P-001 (orden natural de
             // Extraccion, sin reordenar).
             assertThat(mes.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
@@ -600,10 +609,10 @@ class ExcelMergerIntegrationTest {
 
         assertThat(report.warnings()).anyMatch(w ->
                 "HOJA".equals(w.category) && w.message.contains("HojaQueNoExiste"));
-        // Y Resultado sigue teniendo 18 filas (sin huerfanos)
+        // Y Resultado sigue teniendo 19 filas (sin huerfanos)
         try (FileInputStream fis = new FileInputStream(outputFile.toFile());
              Workbook wb = WorkbookFactory.create(fis)) {
-            assertThat(wb.getSheet("Resultado").getLastRowNum() + 1).isEqualTo(18);
+            assertThat(wb.getSheet("Resultado").getLastRowNum() + 1).isEqualTo(19);
         }
     }
 
@@ -643,12 +652,14 @@ class ExcelMergerIntegrationTest {
 
         new ExcelMerger(cfg, report).merge();
 
-        // MES = 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 = 18
-        assertThat(report.sheets()).containsEntry("Resultado", 18);
+        // MES = 1 cabecera + 14 filas texto + 3 filas regresion v1.6.2 +
+        //       1 regresion v1.8.0 (P-015) = 19
+        assertThat(report.sheets()).containsEntry("Resultado", 19);
         // Equipos = 1 cabecera + 10 entradas (de test-config.properties)
         assertThat(report.sheets()).containsEntry("Equipos", 11);
-        // Extraccion = 1 cabecera + 14 texto + 3 regresion + 1 Peticion vacia = 19
-        assertThat(report.sheets()).containsEntry("Extraccion", 19);
+        // Extraccion = 1 cabecera + 14 texto + 3 regresion v1.6.2 +
+        //              1 regresion v1.8.0 + 1 Peticion vacia = 20
+        assertThat(report.sheets()).containsEntry("Extraccion", 20);
     }
 
     @Test
@@ -701,10 +712,27 @@ class ExcelMergerIntegrationTest {
             assertThat(jiraFormula).startsWith("SUMIFS(");
             assertThat(jiraFormula).contains("Resultado!");
 
-            // Fila de totales al final con SUM(4:...)
+            // Fila de totales de la PRIMERA tabla con SUM(B4:...).
+            // Con v1.8.0 y summary.byResponsible.enabled=true, la hoja
+            // Resumen tiene una segunda tabla debajo; por eso no podemos
+            // mirar la ultima fila de la hoja entera. Buscamos la primera
+            // fila "Total" desde la cabecera (fila 2) de arriba hacia abajo.
             int last = resumen.getLastRowNum();
-            Row totals = resumen.getRow(last);
-            assertThat(totals.getCell(0).getStringCellValue()).isEqualTo("Total");
+            Row totals = null;
+            for (int r = 3; r <= last; r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                org.apache.poi.ss.usermodel.Cell c0 = row.getCell(0);
+                if (c0 != null
+                        && c0.getCellType() == org.apache.poi.ss.usermodel.CellType.STRING
+                        && "Total".equals(c0.getStringCellValue())) {
+                    totals = row;
+                    break;
+                }
+            }
+            assertThat(totals)
+                    .as("Debe existir una fila 'Total' en la primera tabla de Resumen")
+                    .isNotNull();
             assertThat(totals.getCell(1).getCellFormula()).startsWith("SUM(B4:");
         }
     }
@@ -1060,5 +1088,189 @@ class ExcelMergerIntegrationTest {
 
             assertThat(wb.getSheet("_Avisos")).isNull();
         }
+    }
+
+    // ==================================================================
+    //  v1.8.0 — Segunda tabla en Resumen (matriz Matricula x Responsable)
+    // ==================================================================
+
+    @Test
+    void byResponsiblePipelineGeneraSegundaTablaConTituloCorrecto(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resumen = wb.getSheet("Resumen");
+            assertThat(resumen).isNotNull();
+
+            // Localizar el titulo de la segunda tabla (no nos atamos a
+            // una fila concreta para no fragilizarse ante cambios de fixtures).
+            int titleRow0 = findRowByFirstCell(resumen,
+                    "Totales Peticiones por Responsables Matrículas");
+            assertThat(titleRow0)
+                    .as("La segunda tabla con su titulo debe existir en Resumen")
+                    .isGreaterThan(0);
+
+            // Header 2 filas mas abajo: corner vacia, luego responsables, y Total al final.
+            Row headerRow = resumen.getRow(titleRow0 + 2);
+            assertThat(headerRow).isNotNull();
+            // Esquina vacia
+            assertThat(headerRow.getCell(0).getStringCellValue()).isEmpty();
+            // Los 3 responsables normalizados a MAYUSCULAS (tresp1@x y
+            // TRESP1@x colapsan en TRESP1@X)
+            assertThat(headerRow.getCell(1).getStringCellValue()).isEqualTo("TRESP1@X");
+            assertThat(headerRow.getCell(2).getStringCellValue()).isEqualTo("TRESP2@X");
+            assertThat(headerRow.getCell(3).getStringCellValue()).isEqualTo("TRESP3@X");
+            // Ultima columna: Total
+            assertThat(headerRow.getCell(4).getStringCellValue()).isEqualTo("Total");
+            // No hay 5a columna
+            assertThat(headerRow.getCell(5)).isNull();
+        }
+    }
+
+    @Test
+    void byResponsibleSumifsCaseInsensitiveSumaTrespVariantes(@TempDir Path tmp) throws IOException {
+        // Este test es el core de la leccion 1.7.1: evaluamos la formula
+        // de verdad con FormulaEvaluator. La matricula 99641 aparece en
+        // la fixture a traves de la fila de regresion 1.6.2 (138074/99641,
+        // tresp1@x, Jira=9 -> PDCL=9*1.2=10.8). Debe ser 10.8 para la
+        // celda (99641, TRESP1@X) de la segunda tabla.
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resumen = wb.getSheet("Resumen");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            int titleRow0 = findRowByFirstCell(resumen,
+                    "Totales Peticiones por Responsables Matrículas");
+            int headerRow0 = titleRow0 + 2;
+            int firstDataRow0 = headerRow0 + 1;
+
+            // Buscar indice de columna del responsable TRESP1@X
+            Row headerRow = resumen.getRow(headerRow0);
+            int respColIdx = -1;
+            for (int c = 1; c < headerRow.getLastCellNum(); c++) {
+                Cell cell = headerRow.getCell(c);
+                if (cell != null && "TRESP1@X".equals(cell.getStringCellValue())) {
+                    respColIdx = c;
+                    break;
+                }
+            }
+            assertThat(respColIdx)
+                    .as("Responsable TRESP1@X debe aparecer en la cabecera")
+                    .isGreaterThan(0);
+
+            // Buscar la fila de la matricula 99641
+            int matrRowIdx = -1;
+            int last = resumen.getLastRowNum();
+            for (int r = firstDataRow0; r <= last; r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null) continue;
+                if (c0.getCellType() != CellType.STRING) continue;
+                if ("99641".equals(c0.getStringCellValue())) {
+                    matrRowIdx = r;
+                    break;
+                }
+            }
+            assertThat(matrRowIdx)
+                    .as("Matricula 99641 debe aparecer como fila en la segunda tabla")
+                    .isGreaterThan(0);
+
+            // Evaluar la celda (99641, TRESP1@X) y comprobar valor.
+            // Resultado de la fixture: 138074/99641/tresp1@x tiene Jira=9
+            // (via SUMIFS sobre Cierre: PROJ-23 con 9h/Dev). PDCL=9*1.2=10.8.
+            // Al haber una unica imputacion con ese responsable/matricula,
+            // la celda de la matriz debe ser exactamente 10.8.
+            CellValue cellVal = evaluator.evaluate(
+                    resumen.getRow(matrRowIdx).getCell(respColIdx));
+            assertThat(cellVal.getNumberValue())
+                    .as("(99641, TRESP1@X) PDCL = 9 (Jira) * 1.2 = 10.8")
+                    .isCloseTo(10.8, org.assertj.core.data.Offset.offset(1e-9));
+        }
+    }
+
+    @Test
+    void byResponsibleTotalGlobalCuadraConPDCLGlobalDeLaPrimeraTabla(@TempDir Path tmp) throws IOException {
+        // Check cruzado: el gran total de la segunda tabla (suma de
+        // todos los PDCL, vista como sumatorio por responsable) debe
+        // coincidir con el total PDCL de la primera tabla (sumatorio
+        // por matricula).
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resumen = wb.getSheet("Resumen");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            // Encontrar la fila totals de la primera tabla (la primera
+            // "Total" que aparece desde arriba).
+            int firstTotalRow0 = findRowByFirstCell(resumen, "Total");
+            assertThat(firstTotalRow0).isGreaterThan(0);
+            // Primera tabla: columnas son Matricula, Jira, REAL, PDCL, PDCL+Deuda.
+            // PDCL es cell(3).
+            double pdclGlobalTabla1 = evaluator.evaluate(
+                    resumen.getRow(firstTotalRow0).getCell(3)).getNumberValue();
+
+            // Encontrar la fila totals de la segunda tabla (la segunda "Total")
+            int titleRow0 = findRowByFirstCell(resumen,
+                    "Totales Peticiones por Responsables Matrículas");
+            int last = resumen.getLastRowNum();
+            int secondTotalRow0 = -1;
+            for (int r = titleRow0 + 1; r <= last; r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null || c0.getCellType() != CellType.STRING) continue;
+                if ("Total".equals(c0.getStringCellValue())) {
+                    secondTotalRow0 = r;
+                    break;
+                }
+            }
+            assertThat(secondTotalRow0)
+                    .as("La fila Total de la segunda tabla debe existir")
+                    .isGreaterThan(titleRow0);
+
+            // El gran total esta en la ultima columna ocupada de esa fila
+            Row totalsRow2 = resumen.getRow(secondTotalRow0);
+            int lastColIdx = totalsRow2.getLastCellNum() - 1;
+            double grandTotal = evaluator.evaluate(totalsRow2.getCell(lastColIdx)).getNumberValue();
+
+            assertThat(grandTotal)
+                    .as("El gran total de la segunda tabla (PDCL via responsables) "
+                            + "debe cuadrar con el total PDCL de la primera tabla "
+                            + "(PDCL via matriculas). Ambos suman las mismas filas "
+                            + "de Resultado, solo que agrupadas distinto.")
+                    .isCloseTo(pdclGlobalTabla1,
+                            org.assertj.core.data.Offset.offset(1e-6));
+        }
+    }
+
+    /**
+     * Busca la primera fila cuya celda(0) contiene exactamente el texto
+     * dado. Devuelve -1 si no se encuentra.
+     */
+    private static int findRowByFirstCell(Sheet sheet, String text) {
+        int last = sheet.getLastRowNum();
+        for (int r = 0; r <= last; r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            Cell c = row.getCell(0);
+            if (c == null) continue;
+            if (c.getCellType() != CellType.STRING) continue;
+            if (text.equals(c.getStringCellValue())) return r;
+        }
+        return -1;
     }
 }

@@ -13,6 +13,12 @@ Uso (desde la raiz del proyecto):
 
 v1.6.2: se incorporan 3 filas de regresion para verificar que el SUMIFS
 tolera mismatch de tipo numero/texto entre Extraccion y Cierre.
+
+v1.8.0: se anade una fila extra en Extraccion con un responsable
+escrito en MAYUSCULAS (TRESP1@x) para validar que la nueva tabla
+"Totales Peticiones por Responsables Matriculas" normaliza
+correctamente (tresp1@x y TRESP1@x cuentan como un unico responsable
+TRESP1@X, y el SUMIFS case-insensitive suma ambas variantes).
 """
 
 from openpyxl import Workbook
@@ -82,12 +88,30 @@ def build_extraccion():
     for r in regression_rows:
         ws.append(r)
 
+    # Filas de regresion v1.8.0 — normalizacion de responsables en la
+    # segunda tabla de Resumen. Responsable escrito en MAYUSCULAS; debe
+    # colapsar con "tresp1@x" en la tabla "Totales Peticiones por
+    # Responsables Matriculas" (una sola columna "TRESP1@X" con el
+    # SUMIFS case-insensitive sumando ambas variantes).
+    #
+    # Peticion=P-015 (str), Recurso=M-1009 (str), Responsable en MAYUS,
+    # PDCL esperado = Jira*1.2 = 0*1.2 = 0 (no tiene imputacion en
+    # Cierre, asi que solo verifica el agrupamiento). Para verificar
+    # que suma efectivamente, el test usa tresp1@x que si tiene horas.
+    responsible_case_row = [
+        "P-015", "Regresion responsable MAYUS", "DF", "Abierta",
+        "TRESP1@x",   # mismo responsable que tresp1@x pero en MAYUS
+        20, 0, "OK", "P1", "Obj V", "CTR-100", "M-1009", "Dev",
+        5, 0, 20, 5,
+    ]
+    ws.append(responsible_case_row)
+
     # Ultima fila: Peticion vacia → debe ser saltada por MesSheetBuilder (ancla vacia)
     skip_row = [""] + ["-"] * (len(EXTRACCION_HEADERS) - 1)
     ws.append(skip_row)
 
     wb.save(f"{OUT_DIR}/extraccion.xlsx")
-    print("Generated extraccion.xlsx: 1 header + 14 data + 3 regression v1.6.2 + 1 skip = 19 filas")
+    print("Generated extraccion.xlsx: 1 header + 14 data + 3 regression v1.6.2 + 1 regression v1.8.0 + 1 skip = 20 filas")
 
 
 # =========================================================================

@@ -421,6 +421,60 @@ public class ConfigValidator {
         if (maxRow != null && maxRow < 1) {
             errors.add("summary.sumifsMaxRow debe ser >= 1 (actual: " + maxRow + ").");
         }
+
+        // v1.8.0 — segunda tabla (matriz Matricula x Responsable)
+        validateSummaryByResponsible();
+    }
+
+    /**
+     * Valida las claves {@code summary.byResponsible.*} (v1.8.0).
+     *
+     * <p>La segunda tabla es opt-in ({@code summary.byResponsible.enabled}
+     * default false). Si esta habilitada sin que {@code summary.enabled}
+     * tambien lo este, se trata como error porque la segunda tabla se
+     * ancla a la hoja Resumen y no tiene sentido sola.</p>
+     */
+    private void validateSummaryByResponsible() {
+        boolean byRespEnabled = config.getBoolean("summary.byResponsible.enabled", false);
+        if (!byRespEnabled) {
+            return;
+        }
+
+        if (!config.getBoolean("summary.enabled", false)) {
+            errors.add("summary.byResponsible.enabled=true requiere summary.enabled=true "
+                    + "(la segunda tabla se renderiza dentro de la hoja Resumen).");
+            // Seguimos validando el resto para dar feedback completo al usuario.
+        }
+
+        if (isBlank(config.get("summary.byResponsible.column", ""))) {
+            errors.add("summary.byResponsible.column: valor requerido cuando "
+                    + "summary.byResponsible.enabled=true.");
+        }
+
+        if (isBlank(config.get("summary.byResponsible.valueColumn", ""))) {
+            errors.add("summary.byResponsible.valueColumn: valor requerido cuando "
+                    + "summary.byResponsible.enabled=true.");
+        }
+
+        if (isBlank(config.get("summary.byResponsible.title", ""))) {
+            errors.add("summary.byResponsible.title: valor requerido cuando "
+                    + "summary.byResponsible.enabled=true.");
+        }
+
+        // gapRows admite 0 (tablas pegadas); por eso validamos distinto de parsePositiveInt.
+        String gapRaw = config.get("summary.byResponsible.gapRows", null);
+        if (gapRaw != null && !gapRaw.trim().isEmpty()) {
+            try {
+                int gap = Integer.parseInt(gapRaw.trim());
+                if (gap < 0) {
+                    errors.add("summary.byResponsible.gapRows debe ser >= 0 (actual: "
+                            + gap + ").");
+                }
+            } catch (NumberFormatException e) {
+                errors.add("summary.byResponsible.gapRows: valor no numerico '"
+                        + gapRaw + "'.");
+            }
+        }
     }
 
     /**

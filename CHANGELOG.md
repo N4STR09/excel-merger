@@ -1,5 +1,72 @@
 # Changelog
 
+## [1.8.0] — Segunda tabla en Resumen: matriz Matrícula × Responsable
+
+Minor opt-in. La hoja `Resumen` admite ahora una **segunda tabla** que cruza matrículas (filas) con responsables técnicos (columnas), mostrando el `PDCL` de cada par. La primera tabla (sumatorio por matrícula de `Jira, REAL, PDCL, PDCL + Deuda`) se mantiene intacta; la nueva va debajo, separada por filas en blanco configurables. Es opt-in (`summary.byResponsible.enabled=true`) y si no se activa el comportamiento de v1.7.1 queda exactamente igual.
+
+### Fix aplicado durante la sesión de release
+
+Durante las pruebas en Excel real (no cubiertas por los tests automáticos, que usan POI `FormulaEvaluator` o LibreOffice) se detectó que las celdas de la segunda tabla se abrían mostrando `0` en todas las posiciones, aunque POI y LibreOffice las evaluaban correctamente. **Causa raíz**: Apache POI escribe las celdas con fórmula sin valor cacheado (`<f>...</f><v></v>`). Excel, en ausencia del flag `fullCalcOnLoad="1"` en el elemento `<calcPr>`, recalcula la mayoría de las fórmulas al abrir pero tiene comportamientos inconsistentes con SUMIFS de 4+ criterios (como los de esta matriz) cuando la caché está vacía. `DerivedSheetBuilder` ya activaba este flag, pero solo si `derived.sheets` tenía contenido — y en el pipeline real está vacío. **Fix**: `SummarySheetBuilder` ahora setea `workbook.setForceFormulaRecalculation(true)` incondicionalmente al final de `build()` cuando la hoja se ha creado. Es idempotente con lo que haría `DerivedSheetBuilder`. Test de regresión `buildFuerzaRecalculoAlAbrirEnExcel` añadido.
+
+### Motivación
+
+La tabla actual responde a "¿cuántas horas ha metido cada persona?", pero no a "¿qué personas están imputando horas en cada matrícula?". La nueva matriz contesta esa segunda pregunta de un vistazo: columnas = responsables, filas = matrículas, celdas = PDCL. Fila `Total` (suma por responsable) y columna `Total` (suma por matrícula) al final, y un gran total en la esquina inferior derecha que debe cuadrar con el `PDCL` global de la primera tabla (check cruzado natural).
+
+### Añadido
+
+- Nueva sección `summary.byResponsible.*` en `config.properties`:
+  - `summary.byResponsible.enabled` (default `false`) — opt-in explícito.
+  - `summary.byResponsible.column` (default `Res. Tecnico`) — columna de `Resultado` a usar como agrupador de columnas. Debe coincidir con un `mes.col.N.name`.
+  - `summary.byResponsible.valueColumn` (default `PDCL`) — métrica única a sumar. Debe coincidir con un `mes.col.N.name`.
+  - `summary.byResponsible.title` (default `Totales Peticiones por Responsables Matrículas`) — texto de la fila de título (merge sobre el ancho de la tabla).
+  - `summary.byResponsible.gapRows` (default `2`) — filas en blanco entre la primera y la segunda tabla. Admite `0` (tablas pegadas).
+- `ConfigValidator.validateSummaryByResponsible` valida las claves nuevas cuando la feature está activa. Regla fuerte: `summary.byResponsible.enabled=true` con `summary.enabled=false` produce error de configuración (la segunda tabla se ancla a la hoja `Resumen`; no tiene sentido sola).
+- `SummarySheetBuilder.writeByResponsibleTable` construye la segunda tabla reutilizando la misma hoja, estilos y helpers que la primera. Es un método privado de la misma clase (misma responsabilidad conceptual: "construir la hoja Resumen"), no una clase separada.
+- `SummarySheetBuilder.discoverResponsibles` — auto-descubre los códigos únicos de la columna de responsable normalizando con `trim()` + `toUpperCase(Locale.ROOT)`. Las variantes `"resp01"`, `"RESP01"`, `" Resp01 "` colapsan en un único responsable `"RESP01"`. El `SUMIFS` de Excel es case-insensitive en criterio de texto, así que una sola celda de cabecera en MAYÚSCULAS suma correctamente todas las variantes del Excel original sin código adicional.
+- `RunReport` recibe un warning informativo (categoría `HOJA`) cuando la segunda tabla se construye con éxito, reportando cuántas matrículas × cuántos responsables.
+
+### Cambiado
+
+- `config.properties` (raíz) y `src/main/resources/config.properties` (fallback) incluyen las claves nuevas. En el fallback interno la feature queda `enabled=false` para no alterar despliegues minimalistas que dependan del classpath resource. El externo la trae `true` con los defaults del uso típico.
+- `src/test/resources/test-config.properties` la habilita para que el pipeline de integración cubra la nueva tabla de verdad (end-to-end con `FormulaEvaluator`, no solo inspección de texto de fórmula).
+
+### Fixtures
+
+- Nueva fila en `gen_fixtures.py` (`extraccion.xlsx`): `P-015 / M-1009 / TRESP1@x`. Exactamente la misma ficha de responsable que `tresp1@x` pero en MAYÚSCULAS, para validar end-to-end que la segunda tabla colapsa ambas en una única columna `TRESP1@X` y el `SUMIFS` case-insensitive suma las dos variantes. El conteo total de filas pasa de `1+14+3+1=19` a `1+14+3+1+1=20`.
+
+### Tests
+
+- **9 tests unitarios nuevos** en `SummarySheetBuilderTest`:
+  - `byResponsibleDeshabilitadoNoAnadeSegundaTabla` — feature-flag off; la hoja `Resumen` queda como en 1.7.1 y no se emite el warning de "añadida tabla".
+  - `byResponsibleConstruyeMatrizConCabecerasCorrectas` — layout básico: título merge + fila en blanco + cabecera (esquina vacía, responsables alfabético, "Total" al final).
+  - `byResponsibleDescubreYNormalizaResponsablesAMayusculas` — 4 filas con `"resp01"`, `"RESP01"`, `" Resp01 "`, `"OTHER"` producen exactamente 2 columnas (`OTHER`, `RESP01`) y 0 columnas extra.
+  - `byResponsibleFormulasTienenFormaCorrectaYRangosAcotados` — la fórmula `SUMIFS` cruza los tres rangos (valor, matrícula, responsable), con rangos acotados `2:10000`, criterio de matrícula `$A<fila>` (relativo en fila, absoluto en columna) y criterio de responsable `B$<fila_cabecera>` (relativo en columna, absoluto en fila).
+  - `byResponsibleSumifsEvaluadoProduceValoresCorrectos` — **evaluación real con `FormulaEvaluator`** (lección 1.7.1) de una cuadrícula completa de 3×2 con valores documentados. Verifica celdas individuales, totales por fila, totales por columna y gran total.
+  - `byResponsibleNormalizacionDeVariantesCapitalizacionSumaCorrectamente` — 3 variantes del mismo código (`resp01`, `RESP01`, ` Resp01 `) suman correctamente al evaluar con `FormulaEvaluator`: `1.5 + 3 + 6 = 10.5`. Este test es el que blinda la normalización end-to-end.
+  - `byResponsibleColumnaResponsableInexistenteEmiteWarningPerosNoRompePrimeraTabla` — si la columna configurada no existe, warning en `RunReport` pero la primera tabla queda intacta.
+  - `byResponsibleGapRowsRespeta` — `gapRows=0` pega las dos tablas sin fila en blanco entre ellas.
+  - `byResponsibleRegistraWarningInformativoEnReport` — el warning de éxito lleva categoría `HOJA` y menciona número de matrículas y responsables.
+- **3 tests de integración nuevos** en `ExcelMergerIntegrationTest` (pipeline completo sobre fixtures reales):
+  - `byResponsiblePipelineGeneraSegundaTablaConTituloCorrecto` — tras el merge, la hoja `Resumen` contiene el título de la segunda tabla y la cabecera con 3 responsables únicos (`TRESP1@X`, `TRESP2@X`, `TRESP3@X`) + `Total`, en ese orden.
+  - `byResponsibleSumifsCaseInsensitiveSumaTrespVariantes` — evalúa con `FormulaEvaluator` la celda `(99641, TRESP1@X)` y verifica que vale exactamente `10.8` (el `PDCL = Jira * 1.2` del responsable `tresp1@x` en la fila `138074/99641`).
+  - `byResponsibleTotalGlobalCuadraConPDCLGlobalDeLaPrimeraTabla` — check cruzado: el gran total de la segunda tabla coincide con el total `PDCL` de la primera. Si divergen, algo está mal en el agrupamiento o en los criterios del `SUMIFS`.
+- Tests existentes de conteo de filas actualizados para la fila v1.8.0: `Extraccion` pasa de 19 a 20, `Resultado` sin huérfanos de 18 a 19, `Resultado` con huérfanos de 21 a 22.
+- `hojaResumenTrasPipelineCompletoExisteYContieneSumatoriosPorMatricula` refactorizado: antes asumía que la última fila de la hoja `Resumen` era el `Total` de la primera tabla; ahora con la segunda tabla activa eso ya no vale. El test escanea desde arriba buscando el primer `Total` (que es el de la primera tabla).
+- `MainTest.appVersionEsLaEsperadaPorLaSesionE` actualizado a `1.8.0`.
+
+### Cambios de versión
+
+- `pom.xml` y `Main.APP_VERSION` pasan de `1.7.1` a `1.8.0`.
+
+### No cambia
+
+- La primera tabla de `Resumen` (sumatorio por matrícula) es byte-a-byte la misma que en 1.7.1: mismo título, misma cabecera, mismas fórmulas, misma fila de totales. Todos los tests que la validan siguen verdes.
+- El resto del pipeline (`Extraccion`, `Cierre`, `Resultado`, `Equipos`, `_Avisos`) no se toca.
+
+### Límite conocido (documentado, no bug)
+
+La normalización de responsables aplica `trim()` + `toUpperCase(Locale.ROOT)` **al descubrir** los códigos únicos para la cabecera de la segunda tabla. El SUMIFS emitido es sin embargo el estándar de Excel, que es case-insensitive pero **no trim-insensitive**. Consecuencia: si el Excel original trae un responsable con espacios al principio o final (`" Resp01 "`), aparece en la cabecera como `RESP01` (una sola columna junto con las variantes sin espacios) pero su fila **no se suma** en esa columna — el criterio `RESP01` del SUMIFS no casa contra la celda ` Resp01 `. El test `byResponsibleEspaciosEnLosDatosOrigenNoCasanEnSumifs` fija este comportamiento para que no se regrese por accidente. El escenario real pactado son códigos alfanuméricos sin espacios, en los que la única variabilidad esperada es la capitalización; el trim completo en la capa de copia de datos queda para una iteración futura si hace falta.
+
 ## [1.7.1] — Fix bug C: matrículas numéricas en Resumen daban Jira=0
 
 Patch. Arregla un bug latente descubierto al escribir los tests de la feature 1.7.0 (huérfanos): el `SUMIFS` del `Resumen` daba `0` para cualquier matrícula todo-dígito (`55751`, `90014`, `99641`, `99642`, etc.), aunque esa matrícula tuviera horas asignadas en `Resultado`. El bug es **preexistente a 1.7.0** — afectaba ya en 1.6.2 y antes — pero no lo cazaba ningún test porque los tests existentes del `Resumen` no evaluaban los SUMIFS con `FormulaEvaluator`. Al añadir esa evaluación en los tests de huérfanos salió a la luz.

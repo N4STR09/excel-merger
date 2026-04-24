@@ -17,8 +17,11 @@ import org.apache.poi.ss.util.CellReference;
 
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -26,7 +29,7 @@ import java.util.Set;
  * columnas numéricas de {@code Resultado} (Jira, REAL, PDCL, PDCL + Deuda
  * por defecto).
  *
- * <p>Estructura de la hoja generada:</p>
+ * <p>Estructura de la hoja generada (tabla 1, por matrícula):</p>
  * <ul>
  *   <li>Fila 1: titulo "Resumen por Matrícula" con merge sobre todas las
  *       columnas.</li>
@@ -36,6 +39,11 @@ import java.util.Set;
  *       {@code Resultado}, con SUMIFS sobre dicha hoja.</li>
  *   <li>Fila N+1: totales por columna.</li>
  * </ul>
+ *
+ * <p>v1.8.0 — segunda tabla opcional en la misma hoja, debajo de la
+ * primera (opt-in con {@code summary.byResponsible.enabled=true}): matriz
+ * cruzada Matrícula × Responsable con el valor de una sola columna
+ * configurable (PDCL por defecto).</p>
  *
  * <p>Las matrículas se auto-descubren leyendo la columna
  * {@code summary.matriculaColumn} (por defecto "Matrícula") de la hoja
@@ -58,6 +66,16 @@ public class SummarySheetBuilder {
     private static final String DEFAULT_SUM_SHEET = "Resultado";
     /** Nombre de la hoja generada por defecto. */
     private static final String DEFAULT_SHEET_NAME = "Resumen";
+
+    // v1.8.0 — defaults de la segunda tabla (por responsable)
+    /** Columna de Resultado usada como agrupador para la segunda tabla. */
+    private static final String DEFAULT_BY_RESP_COLUMN = "Res. Tecnico";
+    /** Columna de valor de la segunda tabla (una sola metrica). */
+    private static final String DEFAULT_BY_RESP_VALUE = "PDCL";
+    /** Titulo de la segunda tabla. */
+    private static final String DEFAULT_BY_RESP_TITLE = "Totales Peticiones por Responsables Matrículas";
+    /** Filas en blanco entre la primera y la segunda tabla. */
+    private static final int DEFAULT_BY_RESP_GAP_ROWS = 2;
 
     // Layout (1-indexado)
     private static final int ROW_TITLE = 1;
@@ -151,10 +169,38 @@ public class SummarySheetBuilder {
         writeSheet(workbook, sheet, sumSheetName, matrColumnName, matrColIdx,
                 valueColumns, matriculas);
 
+        // v1.8.0 — segunda tabla opcional (matriz Matrícula × Responsable)
+        if (config.getBoolean("summary.byResponsible.enabled", false)) {
+            int firstTableLastRow0 = sheet.getLastRowNum();
+            int gapRows = Math.max(0,
+                    config.getInt("summary.byResponsible.gapRows", DEFAULT_BY_RESP_GAP_ROWS));
+            int startRow0 = firstTableLastRow0 + 1 + gapRows;
+            int firstTableColsExcel = 1 + valueColumns.size();
+            writeByResponsibleTable(workbook, sheet, startRow0, sumSheetName,
+                    matrColIdx, matriculas, firstTableColsExcel);
+        }
+
         int totalRows = sheet.getLastRowNum() + 1;
         report.addSheet(sheetName, totalRows);
         log.info("'{}' creada con {} matricula(s) y {} columna(s) de valor.",
                 sheetName, matriculas.size(), valueColumns.size());
+
+        // v1.8.0 — Forzar recalculo al abrir el fichero en Excel.
+        //
+        // Razon: POI escribe las celdas con fórmula sin valor cacheado
+        // (<f>...</f><v></v>). LibreOffice y Google Sheets recalculan al
+        // abrir igualmente. Excel tambien suele recalcular, pero en
+        // SUMIFS con multiples criterios (como los de la segunda tabla,
+        // 4 argumentos) hay escenarios reportados donde muestra 0 si el
+        // workbook no lleva el flag fullCalcOnLoad=1 en calcPr.
+        //
+        // DerivedSheetBuilder ya setea este flag al final de su buildAll,
+        // pero solo si derived.sheets no esta vacio. En el pipeline actual
+        // derived.sheets=, asi que el flag no se ponia y solo las formulas
+        // cacheadas implicitamente funcionaban. Lo seteamos aqui siempre
+        // que se haya construido Resumen (idempotente: si DerivedSheet
+        // tambien lo setea, da igual).
+        workbook.setForceFormulaRecalculation(true);
     }
 
     // ==================================================================
@@ -248,6 +294,209 @@ public class SummarySheetBuilder {
     }
 
     // ==================================================================
+    //  v1.8.0 — Segunda tabla: matriz Matrícula × Responsable
+    // ==================================================================
+
+    /**
+     * Construye la segunda tabla de Resumen, debajo de la primera, en
+     * forma de matriz cruzada Matrícula (filas) × Responsable (columnas)
+     * sumando la columna configurada en
+     * {@code summary.byResponsible.valueColumn} (por defecto "PDCL").
+     *
+     * <p>Layout:</p>
+     * <ul>
+     *   <li>Fila {@code startRow0}: titulo (merge sobre todas las columnas).</li>
+     *   <li>Fila {@code startRow0 + 2}: cabecera (esquina vacía +
+     *       responsables en MAYUSCULAS + "Total").</li>
+     *   <li>Filas siguientes: una por matricula; celdas = SUMIFS cruzando
+     *       matricula (fila) × responsable (columna) sobre la misma hoja
+     *       de datos que la primera tabla (Resultado).</li>
+     *   <li>Fila final: "Total" + SUM por columna de responsable +
+     *       gran total (SUM de la columna Total).</li>
+     * </ul>
+     *
+     * <p>Normalizacion de responsables: se agrupa por codigo en
+     * MAYUSCULAS ({@code Locale.ROOT}) tras {@code trim()}. El SUMIFS
+     * de Excel es case-insensitive en criterios de texto, asi que una
+     * unica celda clave en MAYUSCULAS suma correctamente todas las
+     * variantes de capitalizacion del Excel original.</p>
+     *
+     * <p>Si la columna de responsable o la columna de valor configuradas
+     * no existen en Resultado, se registra un warning y la tabla no se
+     * genera (pero la primera tabla queda intacta).</p>
+     */
+    private void writeByResponsibleTable(Workbook wb, Sheet sheet, int startRow0,
+                                         String sumSheetName, int matrColIdx,
+                                         List<String> matriculas,
+                                         int firstTableColsExcel) {
+        Sheet sumSheet = wb.getSheet(sumSheetName);
+        Row sumHeaderRow = sumSheet.getRow(0);
+
+        String respColName = config.get("summary.byResponsible.column", DEFAULT_BY_RESP_COLUMN);
+        String valueColName = config.get("summary.byResponsible.valueColumn", DEFAULT_BY_RESP_VALUE);
+        String title = config.get("summary.byResponsible.title", DEFAULT_BY_RESP_TITLE);
+
+        int respColIdx = PoiUtils.findColumnIndex(sumHeaderRow, respColName);
+        if (respColIdx < 0) {
+            log.warn("Columna '{}' no encontrada en '{}'. Segunda tabla omitida.",
+                    respColName, sumSheetName);
+            report.addWarning("CABECERA",
+                    "Columna '" + respColName + "' no encontrada en '"
+                            + sumSheetName + "'. Tabla por responsable omitida.");
+            return;
+        }
+
+        int valueColIdx = PoiUtils.findColumnIndex(sumHeaderRow, valueColName);
+        if (valueColIdx < 0) {
+            log.warn("Columna de valor '{}' no encontrada en '{}'. Segunda tabla omitida.",
+                    valueColName, sumSheetName);
+            report.addWarning("CABECERA",
+                    "Columna de valor '" + valueColName + "' no encontrada en '"
+                            + sumSheetName + "'. Tabla por responsable omitida.");
+            return;
+        }
+
+        List<String> responsibles = discoverResponsibles(sumSheet, respColIdx);
+        if (responsibles.isEmpty()) {
+            log.info("No hay responsables en '{}'; tabla por responsable omitida.", sumSheetName);
+            report.addWarning("CONFIG",
+                    "No se encontraron responsables en '" + sumSheetName
+                            + "'. Tabla por responsable omitida.");
+            return;
+        }
+
+        CellStyle titleStyle = StyleFactory.summaryBlockHeader(wb);
+        CellStyle headerStyle = StyleFactory.summarySubHeaderGray(wb, true);
+        CellStyle valueCellStyle = StyleFactory.summaryValueCell(wb);
+        CellStyle numericCellStyle = StyleFactory.summaryNumericCell(wb);
+        CellStyle totalsStyle = StyleFactory.summaryTotalCell(wb, true);
+
+        // Nº de columnas de Excel que usa la tabla:
+        //   1 (clave matricula) + N responsables + 1 (Total de fila)
+        int totalColsExcel = 1 + responsibles.size() + 1;
+
+        // Fila de titulo (merge)
+        Row titleRow = sheet.createRow(startRow0);
+        Cell titleCell = titleRow.createCell(0);
+        titleCell.setCellValue(title);
+        titleCell.setCellStyle(titleStyle);
+        for (int c = 1; c < totalColsExcel; c++) {
+            titleRow.createCell(c).setCellStyle(titleStyle);
+        }
+        if (totalColsExcel > 1) {
+            sheet.addMergedRegion(new CellRangeAddress(
+                    startRow0, startRow0, 0, totalColsExcel - 1));
+        }
+
+        // Fila de cabeceras (separada del titulo por una fila en blanco,
+        // igual que la primera tabla)
+        int headerRow0 = startRow0 + 2;
+        Row headerRow = sheet.createRow(headerRow0);
+        // Esquina superior izquierda: vacia con estilo de cabecera
+        Cell corner = headerRow.createCell(0);
+        corner.setCellValue("");
+        corner.setCellStyle(headerStyle);
+        for (int i = 0; i < responsibles.size(); i++) {
+            Cell c = headerRow.createCell(1 + i);
+            c.setCellValue(responsibles.get(i));
+            c.setCellStyle(headerStyle);
+        }
+        // Ultima columna: "Total"
+        int totalColIdx0 = 1 + responsibles.size();
+        Cell totalHeader = headerRow.createCell(totalColIdx0);
+        totalHeader.setCellValue("Total");
+        totalHeader.setCellStyle(headerStyle);
+
+        // Filas de datos: una por matricula
+        int firstDataRow0 = headerRow0 + 1;
+        int maxRow = Math.max(2, config.getInt("summary.sumifsMaxRow", 10000));
+        String quotedSum = PoiUtils.quoteSheetName(sumSheetName);
+        String matrLetter = CellReference.convertNumToColString(matrColIdx);
+        String respLetter = CellReference.convertNumToColString(respColIdx);
+        String valueLetter = CellReference.convertNumToColString(valueColIdx);
+
+        for (int i = 0; i < matriculas.size(); i++) {
+            String matr = matriculas.get(i);
+            int rowIdx0 = firstDataRow0 + i;
+            Row r = sheet.createRow(rowIdx0);
+
+            // Celda clave: matricula (siempre STRING por el mismo motivo
+            // que en la primera tabla — ver setNumericOrString).
+            Cell matrCell = r.createCell(0);
+            setNumericOrString(matrCell, matr);
+            matrCell.setCellStyle(valueCellStyle);
+
+            // SUMIFS por cada responsable
+            for (int j = 0; j < responsibles.size(); j++) {
+                Cell c = r.createCell(1 + j);
+                // La cabecera esta en fila Excel (headerRow0 + 1); la
+                // referencia al responsable es absoluta en fila (fila de
+                // cabecera fija) y relativa en columna (distinta por celda).
+                String respHeaderRef = CellReference.convertNumToColString(1 + j)
+                        + "$" + (headerRow0 + 1);
+                String formula = "SUMIFS("
+                        + quotedSum + "!" + valueLetter + "2:" + valueLetter + maxRow + ","
+                        + quotedSum + "!" + matrLetter + "2:" + matrLetter + maxRow + ","
+                        + "$A" + (rowIdx0 + 1) + ","
+                        + quotedSum + "!" + respLetter + "2:" + respLetter + maxRow + ","
+                        + respHeaderRef + ")";
+                c.setCellFormula(formula);
+                c.setCellStyle(numericCellStyle);
+            }
+
+            // Columna Total por fila: SUM sobre los responsables de esa fila
+            Cell rowTotal = r.createCell(totalColIdx0);
+            String firstRespLetter = CellReference.convertNumToColString(1);
+            String lastRespLetter = CellReference.convertNumToColString(responsibles.size());
+            rowTotal.setCellFormula("SUM(" + firstRespLetter + (rowIdx0 + 1)
+                    + ":" + lastRespLetter + (rowIdx0 + 1) + ")");
+            rowTotal.setCellStyle(totalsStyle);
+        }
+
+        // Fila final de totales por columna
+        if (!matriculas.isEmpty()) {
+            int totalsRow0 = firstDataRow0 + matriculas.size();
+            Row totalsRow = sheet.createRow(totalsRow0);
+            Cell totLabel = totalsRow.createCell(0);
+            totLabel.setCellValue("Total");
+            totLabel.setCellStyle(totalsStyle);
+
+            int firstDataExcel = firstDataRow0 + 1;
+            int lastDataExcel = firstDataRow0 + matriculas.size();
+            // Total por cada responsable
+            for (int j = 0; j < responsibles.size(); j++) {
+                String letter = CellReference.convertNumToColString(1 + j);
+                Cell c = totalsRow.createCell(1 + j);
+                c.setCellFormula("SUM(" + letter + firstDataExcel
+                        + ":" + letter + lastDataExcel + ")");
+                c.setCellStyle(totalsStyle);
+            }
+            // Esquina inferior derecha: total global (SUM sobre la columna Total)
+            Cell grandTotal = totalsRow.createCell(totalColIdx0);
+            String totalLetter = CellReference.convertNumToColString(totalColIdx0);
+            grandTotal.setCellFormula("SUM(" + totalLetter + firstDataExcel
+                    + ":" + totalLetter + lastDataExcel + ")");
+            grandTotal.setCellStyle(totalsStyle);
+        }
+
+        // Ancho de columnas: la primera tabla ya asigno 20 a col 0
+        // (matricula) y 18 a las cols 1..firstTableColsExcel-1. No las
+        // pisamos: solo ensanchamos las columnas nuevas a la derecha,
+        // mas estrechas (14 unidades) porque las columnas de responsable
+        // se acumulan y es facil tener muchas.
+        for (int c = firstTableColsExcel; c <= totalColIdx0; c++) {
+            sheet.setColumnWidth(c, 14 * 256);
+        }
+
+        report.addWarning("HOJA",
+                "Resumen: anadida tabla '" + title + "' ("
+                        + matriculas.size() + " matriculas x "
+                        + responsibles.size() + " responsables).");
+        log.info("Segunda tabla de Resumen anadida: {} matriculas x {} responsables.",
+                matriculas.size(), responsibles.size());
+    }
+
+    // ==================================================================
     //  Auto-descubrimiento de matrículas en Resultado
     // ==================================================================
 
@@ -287,6 +536,47 @@ public class SummarySheetBuilder {
         List<String> out = new ArrayList<>(numeric.size() + others.size());
         out.addAll(numeric);
         out.addAll(others);
+        return out;
+    }
+
+    /**
+     * Recorre la columna de responsables y devuelve los codigos unicos
+     * normalizados a MAYUSCULAS, ordenados alfabeticamente.
+     *
+     * <p>Normalizacion aplicada: {@code trim()} + {@code toUpperCase(Locale.ROOT)}.
+     * Los duplicados por capitalizacion ("resp01", "RESP01", " Resp01 ")
+     * se colapsan en una sola entrada ("RESP01") en la cabecera.</p>
+     *
+     * <p><b>Limite conocido sobre el SUMIFS emitido</b>: Excel SUMIFS es
+     * case-insensitive en criterios de texto, asi que las variantes
+     * "resp01" y "RESP01" del origen suman correctamente contra el
+     * criterio "RESP01" puesto en la cabecera. Pero SUMIFS NO es
+     * trim-insensitive: una variante " Resp01 " con espacios al principio
+     * o final aparece como la misma cabecera (por el trim al descubrir),
+     * pero su fila no se suma en esa columna porque el criterio "RESP01"
+     * no casa contra " Resp01 ". El alcance pactado para 1.8.0 son
+     * codigos alfanumericos sin espacios; el trim completo de los datos
+     * origen queda para una iteracion futura.</p>
+     */
+    private static List<String> discoverResponsibles(Sheet sheet, int colIdx) {
+        // LinkedHashMap para que, si aparecen dos variantes distintas,
+        // nos quedemos con la primera en forma MAYUSCULAS (determinista).
+        Map<String, String> normalizedToCanonical = new LinkedHashMap<>();
+        int last = sheet.getLastRowNum();
+        for (int r = 1; r <= last; r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            Cell c = row.getCell(colIdx);
+            String s = cellToStringForKey(c);
+            if (s == null) continue;
+            s = s.trim();
+            if (s.isEmpty()) continue;
+            String upper = s.toUpperCase(Locale.ROOT);
+            normalizedToCanonical.putIfAbsent(upper, upper);
+        }
+
+        List<String> out = new ArrayList<>(normalizedToCanonical.values());
+        out.sort(String::compareTo);
         return out;
     }
 

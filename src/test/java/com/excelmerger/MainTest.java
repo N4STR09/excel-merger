@@ -66,6 +66,11 @@ class MainTest {
         //        SUMIFS no casaba contra la columna Matricula de Resultado
         //        (que es STRING tras el fix 1.6.2), dando Jira=0 para todas
         //        las matriculas numericas en Resumen.
-        assertThat(Main.APP_VERSION).isEqualTo("1.7.1");
+        // 1.8.0: segunda tabla opcional en Resumen — matriz cruzada
+        //        Matricula x Res. Tecnico con la metrica PDCL (u otra
+        //        configurable). Opt-in via summary.byResponsible.enabled.
+        //        Normaliza responsables a MAYUSCULAS para colapsar
+        //        variantes de capitalizacion del Excel original.
+        assertThat(Main.APP_VERSION).isEqualTo("1.8.0");
     }
 }
