@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Factoria de {@link MesColumnStrategy} a partir de las claves del config
@@ -29,7 +30,7 @@ public final class MesColumnStrategyFactory {
         boolean greenIfPositive = config.getBoolean(prefix + "greenIfPositive", false);
         String fillColor = nullIfBlank(config.get(prefix + "fill", null));
         String redIfNotEqualTo = nullIfBlank(config.get(prefix + "redIfNotEqualTo", null));
-        String normalizedType = type == null ? "" : type.trim().toUpperCase();
+        String normalizedType = type == null ? "" : type.trim().toUpperCase(Locale.ROOT);
 
         switch (normalizedType) {
             case "COPY": {

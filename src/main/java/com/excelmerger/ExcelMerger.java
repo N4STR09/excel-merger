@@ -403,7 +403,8 @@ public class ExcelMerger {
                 nextRowIdx++;
                 continue;
             }
-            Row targetRow = target.createRow(nextRowIdx++);
+            Row targetRow = target.createRow(nextRowIdx);
+            nextRowIdx++;
             sheetCopier.copyRow(sourceRow, targetRow, result, styleCache);
         }
 

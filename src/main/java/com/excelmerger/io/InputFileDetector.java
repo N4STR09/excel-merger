@@ -13,6 +13,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -52,7 +53,7 @@ public final class InputFileDetector {
                 .filter(f -> !f.getName().startsWith("~$"))
                 .filter(f -> !f.getName().startsWith("."))
                 .filter(f -> hasExcelExtension(f.getName()))
-                .sorted(Comparator.comparing(f -> f.getName().toLowerCase()))
+                .sorted(Comparator.comparing(f -> f.getName().toLowerCase(Locale.ROOT)))
                 .collect(Collectors.toList());
     }
 
@@ -83,7 +84,7 @@ public final class InputFileDetector {
     }
 
     public static boolean hasExcelExtension(String fileName) {
-        String lower = fileName.toLowerCase();
+        String lower = fileName.toLowerCase(Locale.ROOT);
         return EXCEL_EXTENSIONS.stream().anyMatch(lower::endsWith);
     }
 

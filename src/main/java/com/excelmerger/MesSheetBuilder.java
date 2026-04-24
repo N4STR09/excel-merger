@@ -29,6 +29,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -58,6 +59,12 @@ import java.util.regex.Pattern;
 public class MesSheetBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(MesSheetBuilder.class);
+
+    /** Categoría de los avisos relacionados con detección de cabeceras. */
+    private static final String WARN_CATEGORY_CABECERA = "CABECERA";
+
+    /** Sufijo común de los mensajes "... MES omitida." */
+    private static final String MSG_SUFFIX_MES_SKIPPED = "'. MES omitida.";
 
     /**
      * Detecta patrones tipo:
@@ -97,17 +104,17 @@ public class MesSheetBuilder {
             return;
         }
         if (workbook.getSheet(mesName) != null) {
-            log.info("Ya existe una hoja '" + mesName + "'. MES omitida.");
+            log.info("Ya existe una hoja '" + mesName + MSG_SUFFIX_MES_SKIPPED);
             report.addWarning("HOJA",
-                    "Ya existe una hoja '" + mesName + "'. MES omitida.");
+                    "Ya existe una hoja '" + mesName + MSG_SUFFIX_MES_SKIPPED);
             return;
         }
 
         Row srcHeader = source.getRow(sourceHeaderRow0);
         if (srcHeader == null) {
-            log.info("No se encuentran cabeceras en '" + sourceName + "'. MES omitida.");
-            report.addWarning("CABECERA",
-                    "No se encuentran cabeceras en '" + sourceName + "'. MES omitida.");
+            log.info("No se encuentran cabeceras en '" + sourceName + MSG_SUFFIX_MES_SKIPPED);
+            report.addWarning(WARN_CATEGORY_CABECERA,
+                    "No se encuentran cabeceras en '" + sourceName + MSG_SUFFIX_MES_SKIPPED);
             return;
         }
 
@@ -115,9 +122,9 @@ public class MesSheetBuilder {
         if (anchorCol0 < 0) {
             log.warn("No se encuentra la columna ancla '{}' en '{}'. MES omitida.",
                     anchorHeader, sourceName);
-            report.addWarning("CABECERA",
+            report.addWarning(WARN_CATEGORY_CABECERA,
                     "Columna ancla '" + anchorHeader + "' no encontrada en '"
-                            + sourceName + "'. MES omitida.");
+                            + sourceName + MSG_SUFFIX_MES_SKIPPED);
             return;
         }
 
@@ -236,7 +243,7 @@ public class MesSheetBuilder {
         while (true) {
             String name = config.get("mes.col." + i + ".name", null);
             if (name == null || name.trim().isEmpty()) break;
-            String type = config.get("mes.col." + i + ".type", "EMPTY").toUpperCase();
+            String type = config.get("mes.col." + i + ".type", "EMPTY").toUpperCase(Locale.ROOT);
             list.add(MesColumnStrategyFactory.fromConfig(config, i, name.trim(), type, report));
             i++;
         }
@@ -299,7 +306,7 @@ public class MesSheetBuilder {
 
     private static String resolveFillHex(String colorName) {
         if (colorName == null) return null;
-        switch (colorName.trim().toUpperCase()) {
+        switch (colorName.trim().toUpperCase(Locale.ROOT)) {
             case "LIGHT_GREEN":    return "FFE2EFDA";
             case "MEDIUM_GREEN":   return "FFC6E0B4";
             case "LIGHT_BLUE":     return "FFDDEBF7";
@@ -524,7 +531,7 @@ public class MesSheetBuilder {
         int orphanHeaderRow0 = PoiUtils.detectHeaderRow(orphanSheet);
         Row orphanHeader = orphanSheet.getRow(orphanHeaderRow0);
         if (orphanHeader == null) {
-            report.addWarning("CABECERA",
+            report.addWarning(WARN_CATEGORY_CABECERA,
                     "No se encontraron cabeceras en '" + orphanSheetName
                             + "'; la seccion de huerfanos se omite.");
             return new ArrayList<>();
@@ -533,7 +540,7 @@ public class MesSheetBuilder {
         int matIdx = PoiUtils.findColumnIndex(orphanHeader, matchMat);
         int hIdx   = PoiUtils.findColumnIndex(orphanHeader, sumCol);
         if (cnIdx < 0 || matIdx < 0 || hIdx < 0) {
-            report.addWarning("CABECERA",
+            report.addWarning(WARN_CATEGORY_CABECERA,
                     "Faltan cabeceras en '" + orphanSheetName + "' para calcular"
                             + " huerfanos (buscadas: '" + matchCN + "', '" + matchMat
                             + "', '" + sumCol + "'); la seccion se omite.");
@@ -595,7 +602,7 @@ public class MesSheetBuilder {
         int recIdx = PoiUtils.findColumnIndex(header, "Recurso");
         Set<String> keys = new LinkedHashSet<>();
         if (petIdx < 0 || recIdx < 0) {
-            report.addWarning("CABECERA",
+            report.addWarning(WARN_CATEGORY_CABECERA,
                     "No se pudieron localizar columnas 'Peticion'/'Recurso' en '"
                             + source.getSheetName() + "' para calcular huerfanos.");
             return keys;

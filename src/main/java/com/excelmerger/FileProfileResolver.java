@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -195,9 +196,9 @@ public class FileProfileResolver {
                 List<String> actualHeaders = readRowAsStrings(sheet, headerRow - 1);
                 int found = 0;
                 for (String expected : expectedHeaders) {
-                    String needle = expected.toLowerCase();
+                    String needle = expected.toLowerCase(Locale.ROOT);
                     boolean present = actualHeaders.stream()
-                            .anyMatch(h -> h.toLowerCase().contains(needle));
+                            .anyMatch(h -> h.toLowerCase(Locale.ROOT).contains(needle));
                     if (present) {
                         found++;
                         result.matchedHeaders.add(expected);
@@ -212,7 +213,7 @@ public class FileProfileResolver {
             for (Map.Entry<String, String> entry : expectedCellValues.entrySet()) {
                 String actual = readCellAsString(sheet, entry.getKey());
                 String expected = entry.getValue();
-                if (actual == null || !actual.toLowerCase().contains(expected.toLowerCase())) {
+                if (actual == null || !actual.toLowerCase(Locale.ROOT).contains(expected.toLowerCase(Locale.ROOT))) {
                     return result; // no match
                 }
                 result.matchedCellValues.put(entry.getKey(), expected);

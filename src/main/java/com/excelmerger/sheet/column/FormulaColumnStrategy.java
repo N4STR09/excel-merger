@@ -8,6 +8,7 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellReference;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -70,7 +71,8 @@ public final class FormulaColumnStrategy extends AbstractMesColumnStrategy {
         // Reemplazar {col:Nombre}. La validez ya se comprobo en preValidate.
         // NOTA: lookup case-sensitive (feature consciente; ver CHANGELOG).
         int guard = 0;
-        while (resolved.contains("{col:") && guard++ < 50) {
+        while (resolved.contains("{col:") && guard < 50) {
+            guard++;
             int start = resolved.indexOf("{col:");
             int end = resolved.indexOf("}", start);
             if (end < 0) break;
@@ -86,11 +88,12 @@ public final class FormulaColumnStrategy extends AbstractMesColumnStrategy {
 
         // Reemplazar {colLetter:X}
         guard = 0;
-        while (resolved.contains("{colLetter:") && guard++ < 50) {
+        while (resolved.contains("{colLetter:") && guard < 50) {
+            guard++;
             int start = resolved.indexOf("{colLetter:");
             int end = resolved.indexOf("}", start);
             if (end < 0) break;
-            String letter = resolved.substring(start + 11, end).trim().toUpperCase();
+            String letter = resolved.substring(start + 11, end).trim().toUpperCase(Locale.ROOT);
             String ref = letter + mesExcelRow;
             resolved = resolved.substring(0, start) + ref + resolved.substring(end + 1);
         }

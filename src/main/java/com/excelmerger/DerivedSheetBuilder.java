@@ -10,6 +10,7 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellReference;
 
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
@@ -24,6 +25,9 @@ import java.util.TreeSet;
 public class DerivedSheetBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(DerivedSheetBuilder.class);
+
+    /** Categoría de los avisos emitidos por este builder. */
+    private static final String WARN_CATEGORY_CONFIG = "CONFIG";
 
     public enum SheetType { FORMULAS, AGGREGATION }
     public enum AggFunction { SUM, AVG, COUNT, MIN, MAX }
@@ -72,10 +76,10 @@ public class DerivedSheetBuilder {
         String typeValue = config.get(typeKey, "FORMULAS");
         SheetType type;
         try {
-            type = SheetType.valueOf(typeValue.toUpperCase());
+            type = SheetType.valueOf(typeValue.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             log.info("Tipo desconocido '" + typeValue + "' para hoja '" + id + "'. Omitida.");
-            report.addWarning("CONFIG",
+            report.addWarning(WARN_CATEGORY_CONFIG,
                     "Tipo '" + typeValue + "' desconocido para hoja derivada '" + id + "'. Omitida.");
             return;
         }
@@ -133,7 +137,7 @@ public class DerivedSheetBuilder {
             ref = new CellReference(cellRef);
         } catch (Exception e) {
             log.info("{}", "[Derived] Referencia de celda invalida: " + cellRef);
-            report.addWarning("CONFIG",
+            report.addWarning(WARN_CATEGORY_CONFIG,
                     "Referencia de celda invalida '" + cellRef + "' en hoja derivada '" + id + "'.");
             return;
         }
@@ -172,7 +176,7 @@ public class DerivedSheetBuilder {
 
         String sourceSheetName = config.get(prefix + "sourceSheet", null);
         if (sourceSheetName == null || sourceSheetName.trim().isEmpty()) {
-            report.addWarning("CONFIG",
+            report.addWarning(WARN_CATEGORY_CONFIG,
                     "'" + prefix + "sourceSheet' requerido para AGGREGATION '" + id + "'. Omitida.");
             return false;
         }
@@ -180,18 +184,18 @@ public class DerivedSheetBuilder {
         String groupColRaw = config.get(prefix + "groupByColumn", null);
         String valueColRaw = config.get(prefix + "valueColumn", null);
         if (groupColRaw == null || valueColRaw == null) {
-            report.addWarning("CONFIG",
+            report.addWarning(WARN_CATEGORY_CONFIG,
                     "AGGREGATION '" + id + "' requiere 'groupByColumn' y 'valueColumn'. Omitida.");
             return false;
         }
-        String groupCol = groupColRaw.trim().toUpperCase();
-        String valueCol = valueColRaw.trim().toUpperCase();
+        String groupCol = groupColRaw.trim().toUpperCase(Locale.ROOT);
+        String valueCol = valueColRaw.trim().toUpperCase(Locale.ROOT);
 
         AggFunction agg;
         try {
-            agg = AggFunction.valueOf(config.get(prefix + "aggregation", "SUM").toUpperCase());
+            agg = AggFunction.valueOf(config.get(prefix + "aggregation", "SUM").toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            report.addWarning("CONFIG",
+            report.addWarning(WARN_CATEGORY_CONFIG,
                     "Funcion de agregacion desconocida para '" + id + "': "
                             + config.get(prefix + "aggregation", "SUM") + ". Omitida.");
             return false;

@@ -85,6 +85,7 @@ class MainTest {
         //        "Extraccion". Los nombres ahora coinciden con los de los
         //        ficheros de entrada habituales. Deteccion sigue siendo
         //        por contenido. Ver CHANGELOG [2.0.0] para guia de migracion.
-        assertThat(Main.APP_VERSION).isEqualTo("2.0.0");
+        // 2.0.1: segunda vuelta de limpieza PMD (sin cambios funcionales).
+        assertThat(Main.APP_VERSION).isEqualTo("2.0.1");
     }
 }

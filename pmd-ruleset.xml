@@ -6,7 +6,7 @@
                              https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
 
     <description>
-        Ruleset PMD de Excel Merger (Sesión E, Fase 3).
+        Ruleset PMD de Excel Merger (Sesión E, Fase 3; revisado en v2.0.1).
 
         NOTA HISTÓRICA: El brief original pedía los rulesets clásicos
         "java-basic", "java-design", "java-unusedcode". Estos nombres
@@ -19,9 +19,8 @@
                               (UnusedLocalVariable, UnusedPrivateField, ...)
           java-design    ->  category/java/design.xml
 
-        Se excluyen reglas de alto ruido conocidas que no aportan valor
-        al proyecto (restricciones sobre tamaño de clase, anidamiento,
-        etc. — apropiadas para una segunda pasada, no para esta sesión).
+        v2.0.1: segunda vuelta de limpieza. Se atacaron las exclusiones
+        anotadas como "para segunda pasada" en v2.0.0. Ver CHANGELOG.
 
         Para tests se aplica un subset más laxo (ver elemento exclude-pattern).
     </description>
@@ -43,21 +42,12 @@
         <!-- POI a veces requiere catch-and-log; la regla es demasiado estricta -->
         <exclude name="AvoidCatchingGenericException"/>
 
-        <!-- === Exclusiones tras primera corrida real de PMD ===
-             (Sesión E, Fase 3). Ver CHANGELOG para el criterio. -->
+        <!-- v2.0.1: AvoidDuplicateLiterals se REACTIVA con minimumLength=5
+             (ver configuración de la regla más abajo). Los literales
+             de dominio se extrajeron a constantes. -->
 
-        <!-- 19 ocurrencias. Cambiar a toLowerCase(Locale.ROOT) alteraría el
-             comportamiento actual (tests verdes con comparación por defecto).
-             Refactor de i18n queda para una pasada futura de hardening. -->
-        <exclude name="UseLocaleWithCaseConversions"/>
-
-        <!-- 10 ocurrencias. Ruido conocido: literales repetidos en mensajes
-             de ayuda y logs; extraerlos a constantes no aporta legibilidad. -->
-        <exclude name="AvoidDuplicateLiterals"/>
-
-        <!-- 5 ocurrencias. Estilo, no bug. Patrón (x = getSomething()) != null
-             es común y legible; refactorizarlo es cambio de código. -->
-        <exclude name="AssignmentInOperand"/>
+        <!-- v2.0.1: UseLocaleWithCaseConversions y AssignmentInOperand
+             se REACTIVAN; los 20 + 5 casos se arreglaron en código. -->
 
         <!-- Falso positivo: advierte sobre ClassLoader en contexto J2EE;
              excel-merger es una CLI standalone, no aplica. -->
@@ -66,6 +56,21 @@
         <!-- Falso positivo: Main.readGitProperties() devuelve Properties
              (no una Collection); PMD confunde tipos. -->
         <exclude name="ReturnEmptyCollectionRatherThanNull"/>
+    </rule>
+
+    <!-- Configuración específica de AvoidDuplicateLiterals.
+         v2.0.1: minimumLength=5 filtra literales muy cortos que son
+         ruido de concatenación ("').", ",\"", "SUM(") y no añaden
+         valor al extraerse. Los 7 literales de dominio duplicados
+         (CABECERA, CONFIG, LOOKUP, Calibri, mes.col., separador de
+         banner, y 5 fragmentos de mensajes de error) se extrajeron
+         a constantes en su clase respectiva. -->
+    <rule ref="category/java/errorprone.xml/AvoidDuplicateLiterals">
+        <properties>
+            <property name="minimumLength" value="5"/>
+            <property name="maxDuplicateLiterals" value="4"/>
+            <property name="skipAnnotations" value="true"/>
+        </properties>
     </rule>
 
     <!-- === BEST PRACTICES ======================================== -->
@@ -94,28 +99,65 @@
 
     <!-- === DESIGN (equivalente a java-design) ==================== -->
     <rule ref="category/java/design.xml">
-        <!-- Reglas sobre métricas y tamaño desactivadas: el proyecto
-             tiene builders legítimamente largos (DerivedSheetBuilder,
-             MesSheetBuilder) y refactorizarlos no es objetivo de esta
-             fase. Se dejan para una segunda pasada. -->
-        <exclude name="AvoidCatchingGenericException"/>
-        <exclude name="AvoidThrowingRawExceptionTypes"/>
+        <!-- DECISIÓN ARQUITECTÓNICA (v2.0.1): los orquestadores
+             MesSheetBuilder (772 LoC), SummarySheetBuilder (664 LoC) y
+             ConfigValidator (607 LoC) son legítimamente complejos porque
+             cada uno encapsula una transformación Excel completa con
+             múltiples casos de negocio. Partirlos en colaboradores
+             pequeños fragmentaría la lógica de dominio sin ganancia real
+             de mantenibilidad: cada sub-pieza solo tendría sentido en el
+             contexto del orquestador. Un refactor de este tipo sería el
+             objetivo de una futura Sesión F, no de esta limpieza PMD.
+
+             En v2.0.1 se revisó caso por caso:
+             - Las exclusiones que sí cubrían código real pero eran
+               fáciles de arreglar sin cambio arquitectónico se
+               arreglaron y se retiraron del exclude list (ver errorprone
+               arriba).
+             - Las exclusiones que resultaron tener 0 violaciones reales
+               hoy (AvoidThrowingRawExceptionTypes, SignatureDeclareThrowsException,
+               UseUtilityClass, LoosePackageCoupling) se retiraron.
+             - El resto, que afecta a los orquestadores grandes, se queda
+               excluido conscientemente con la justificación de abajo. -->
+
+        <!-- POI requiere catch-and-log defensivo: evaluateAll(),
+             autoSizeColumn() y rutinas similares pueden lanzar varias
+             subclases de RuntimeException no declaradas (POI no las
+             documenta consistentemente). Capturar Exception es la única
+             forma práctica de evitar que un bug de POI tumbe el merger.
+             Los 5 catches en DerivedSheetBuilder (2), FileProfileResolver
+             (1), Main (1) y un catch-ignored en autoSizeColumn son todos
+             conscientes. La exclusión efectiva vive en el bloque
+             errorprone de arriba; desde PMD 7.18.0 la regla se movió
+             de design a errorprone (PMD 8 retirará la ubicación antigua). -->
+
+        <!-- Complejidad ciclomática / cognitiva / NPath / Ncss:
+             MesSheetBuilder y SummarySheetBuilder concentran mucha lógica
+             de construcción de hojas Excel que no se puede descomponer
+             sin perder cohesión. Ver nota arquitectónica arriba. -->
         <exclude name="CognitiveComplexity"/>
-        <exclude name="CouplingBetweenObjects"/>
         <exclude name="CyclomaticComplexity"/>
-        <exclude name="DataClass"/>
+        <exclude name="NPathComplexity"/>
+        <exclude name="NcssCount"/>
+
+        <!-- Acoplamiento a POI es inevitable por diseño. -->
+        <exclude name="CouplingBetweenObjects"/>
         <exclude name="ExcessiveImports"/>
         <exclude name="ExcessiveParameterList"/>
         <exclude name="ExcessivePublicCount"/>
+
+        <!-- Tamaño de orquestadores: ver nota arquitectónica arriba. -->
         <exclude name="GodClass"/>
-        <exclude name="LawOfDemeter"/>
-        <exclude name="LoosePackageCoupling"/>
-        <exclude name="NcssCount"/>
-        <exclude name="NPathComplexity"/>
-        <exclude name="SignatureDeclareThrowsException"/>
         <exclude name="TooManyFields"/>
         <exclude name="TooManyMethods"/>
-        <exclude name="UseUtilityClass"/>
+
+        <!-- DataClass: RunReport y VlookupLink son objetos de valor
+             intencionales; DataClass es la forma correcta para ellos. -->
+        <exclude name="DataClass"/>
+
+        <!-- POI requiere cadenas como row.getCell(i).getStringCellValue().
+             LawOfDemeter no se puede respetar sin envolver POI completamente. -->
+        <exclude name="LawOfDemeter"/>
     </rule>
 
 </ruleset>

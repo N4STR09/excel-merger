@@ -85,7 +85,8 @@ public class AvisosSheetBuilder {
 
         int rowIdx = 1;
         for (RunReport.Warning w : warnings) {
-            Row r = sheet.createRow(rowIdx++);
+            Row r = sheet.createRow(rowIdx);
+            rowIdx++;
             r.createCell(0).setCellValue(w.category);
             r.createCell(1).setCellValue(w.message);
         }

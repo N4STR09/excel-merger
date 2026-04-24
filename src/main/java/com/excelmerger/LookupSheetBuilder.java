@@ -35,6 +35,9 @@ public class LookupSheetBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(LookupSheetBuilder.class);
 
+    /** Categoría de los avisos emitidos por este builder. */
+    private static final String WARN_CATEGORY_LOOKUP = "LOOKUP";
+
     private final ConfigLoader config;
     private final RunReport report;
 
@@ -59,7 +62,7 @@ public class LookupSheetBuilder {
 
         if (workbook.getSheet(id) != null) {
             log.info("Ya existe una hoja '" + id + "'. Se omite.");
-            report.addWarning("LOOKUP",
+            report.addWarning(WARN_CATEGORY_LOOKUP,
                     "Ya existe una hoja '" + id + "' en el libro; lookup omitido.");
             return;
         }
@@ -72,7 +75,7 @@ public class LookupSheetBuilder {
 
         if (data.isEmpty()) {
             log.info("'" + id + "' no tiene datos (lookup." + id + ".data). Se omite.");
-            report.addWarning("LOOKUP",
+            report.addWarning(WARN_CATEGORY_LOOKUP,
                     "Lookup '" + id + "' sin datos ('lookup." + id + ".data'). Omitido.");
             return;
         }
@@ -88,7 +91,8 @@ public class LookupSheetBuilder {
         Set<String> keys = new LinkedHashSet<>();
         int rowIdx = 1;
         for (String[] pair : pairs) {
-            Row r = sheet.createRow(rowIdx++);
+            Row r = sheet.createRow(rowIdx);
+            rowIdx++;
             r.createCell(0).setCellValue(pair[0]);
             r.createCell(1).setCellValue(pair[1]);
             keys.add(pair[0]);
@@ -120,14 +124,14 @@ public class LookupSheetBuilder {
             int i = entry.indexOf(sep);
             if (i < 0) {
                 log.info("[Lookup] Entrada sin separador '{}': {}", sep, entry);
-                report.addWarning("LOOKUP",
+                report.addWarning(WARN_CATEGORY_LOOKUP,
                         "Entrada sin separador '" + sep + "' en '" + id + "': '" + entry + "'.");
                 continue;
             }
             String key = entry.substring(0, i).trim();
             String value = entry.substring(i + sep.length()).trim();
             if (key.isEmpty()) {
-                report.addWarning("LOOKUP",
+                report.addWarning(WARN_CATEGORY_LOOKUP,
                         "Entrada con clave vacia en '" + id + "': '" + entry + "'.");
                 continue;
             }

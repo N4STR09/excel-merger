@@ -58,6 +58,12 @@ public class SummarySheetBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(SummarySheetBuilder.class);
 
+    /** Categoría de los avisos relacionados con detección de cabeceras. */
+    private static final String WARN_CATEGORY_CABECERA = "CABECERA";
+
+    /** Sufijo común de los mensajes "columna X no encontrada en Y". */
+    private static final String MSG_COL_NOT_FOUND_IN = "' no encontrada en '";
+
     /** Nombre por defecto de la columna clave en Resultado. */
     private static final String DEFAULT_MATRICULA_COLUMN = "Matrícula";
     /** Columnas agregadas por defecto. */
@@ -125,7 +131,7 @@ public class SummarySheetBuilder {
         Row sumHeaderRow = sumSheet.getRow(0);
         if (sumHeaderRow == null) {
             log.warn("La hoja origen '{}' no tiene cabeceras. Resumen omitido.", sumSheetName);
-            report.addWarning("CABECERA",
+            report.addWarning(WARN_CATEGORY_CABECERA,
                     "'" + sumSheetName + "' sin cabeceras. Resumen omitido.");
             return;
         }
@@ -134,8 +140,8 @@ public class SummarySheetBuilder {
         if (matrColIdx < 0) {
             log.warn("Columna '{}' no encontrada en '{}'. Resumen omitido.",
                     matrColumnName, sumSheetName);
-            report.addWarning("CABECERA",
-                    "Columna '" + matrColumnName + "' no encontrada en '"
+            report.addWarning(WARN_CATEGORY_CABECERA,
+                    "Columna '" + matrColumnName + MSG_COL_NOT_FOUND_IN
                             + sumSheetName + "'. Resumen omitido.");
             return;
         }
@@ -148,8 +154,8 @@ public class SummarySheetBuilder {
             if (idx < 0) {
                 log.warn("Columna de valor '{}' no encontrada en '{}'. Se omite de Resumen.",
                         name, sumSheetName);
-                report.addWarning("CABECERA",
-                        "Columna de valor '" + name + "' no encontrada en '"
+                report.addWarning(WARN_CATEGORY_CABECERA,
+                        "Columna de valor '" + name + MSG_COL_NOT_FOUND_IN
                                 + sumSheetName + "'. Columna omitida de Resumen.");
                 continue;
             }
@@ -340,8 +346,8 @@ public class SummarySheetBuilder {
         if (respColIdx < 0) {
             log.warn("Columna '{}' no encontrada en '{}'. Segunda tabla omitida.",
                     respColName, sumSheetName);
-            report.addWarning("CABECERA",
-                    "Columna '" + respColName + "' no encontrada en '"
+            report.addWarning(WARN_CATEGORY_CABECERA,
+                    "Columna '" + respColName + MSG_COL_NOT_FOUND_IN
                             + sumSheetName + "'. Tabla por responsable omitida.");
             return;
         }
@@ -350,8 +356,8 @@ public class SummarySheetBuilder {
         if (valueColIdx < 0) {
             log.warn("Columna de valor '{}' no encontrada en '{}'. Segunda tabla omitida.",
                     valueColName, sumSheetName);
-            report.addWarning("CABECERA",
-                    "Columna de valor '" + valueColName + "' no encontrada en '"
+            report.addWarning(WARN_CATEGORY_CABECERA,
+                    "Columna de valor '" + valueColName + MSG_COL_NOT_FOUND_IN
                             + sumSheetName + "'. Tabla por responsable omitida.");
             return;
         }

@@ -27,6 +27,9 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
  */
 public final class StyleFactory {
 
+    /** Fuente estándar para todos los estilos. */
+    private static final String FONT_CALIBRI = "Calibri";
+
     private StyleFactory() {
         // Utility class
     }
@@ -96,7 +99,7 @@ public final class StyleFactory {
         XSSFCellStyle s = (XSSFCellStyle) wb.createCellStyle();
         XSSFFont f = (XSSFFont) wb.createFont();
         f.setBold(true);
-        f.setFontName("Calibri");
+        f.setFontName(FONT_CALIBRI);
         f.setFontHeightInPoints((short) 10);
         f.setColor(argb(wb, COLOR_WHITE));
         s.setFont(f);
@@ -123,7 +126,7 @@ public final class StyleFactory {
     public static CellStyle summaryValueCell(Workbook wb) {
         XSSFCellStyle s = (XSSFCellStyle) wb.createCellStyle();
         XSSFFont f = (XSSFFont) wb.createFont();
-        f.setFontName("Calibri");
+        f.setFontName(FONT_CALIBRI);
         f.setFontHeightInPoints((short) 10);
         s.setFont(f);
         applyThinBorders(s);
@@ -140,7 +143,7 @@ public final class StyleFactory {
         XSSFCellStyle s = (XSSFCellStyle) wb.createCellStyle();
         XSSFFont f = (XSSFFont) wb.createFont();
         f.setBold(true);
-        f.setFontName("Calibri");
+        f.setFontName(FONT_CALIBRI);
         f.setFontHeightInPoints((short) 10);
         s.setFont(f);
         if (filled) {
@@ -164,7 +167,7 @@ public final class StyleFactory {
     public static CellStyle summaryNumericCell(Workbook wb) {
         XSSFCellStyle s = (XSSFCellStyle) wb.createCellStyle();
         XSSFFont f = (XSSFFont) wb.createFont();
-        f.setFontName("Calibri");
+        f.setFontName(FONT_CALIBRI);
         f.setFontHeightInPoints((short) 10);
         s.setFont(f);
         applyThinBorders(s);
@@ -182,7 +185,7 @@ public final class StyleFactory {
         XSSFCellStyle s = (XSSFCellStyle) wb.createCellStyle();
         XSSFFont f = (XSSFFont) wb.createFont();
         f.setBold(bold);
-        f.setFontName("Calibri");
+        f.setFontName(FONT_CALIBRI);
         f.setFontHeightInPoints((short) 10);
         s.setFont(f);
         s.setFillForegroundColor(argb(wb, fillHex));

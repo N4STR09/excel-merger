@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,6 +47,15 @@ public class ConfigValidator {
 
     private static final Pattern PLACEHOLDER_COL = Pattern.compile("\\{col:([^}]+)\\}");
     private static final Pattern COLUMN_LETTER = Pattern.compile("[A-Za-z]+");
+
+    /** Prefijo de las propiedades de configuración de columnas MES. */
+    private static final String PROP_PREFIX_MES_COL = "mes.col.";
+
+    /** Sufijo común de los mensajes que listan las hojas conocidas. */
+    private static final String MSG_SUFFIX_KNOWN_SHEETS = "'. Hojas conocidas: ";
+
+    /** Sufijo común de los mensajes que listan valores válidos. */
+    private static final String MSG_SUFFIX_ALLOWED_VALUES = "'. Valores permitidos: ";
 
     private final ConfigLoader config;
     private final List<String> errors = new ArrayList<>();
@@ -92,9 +102,9 @@ public class ConfigValidator {
     }
 
     private String validateMergeMode() {
-        String mode = config.get("merge.mode", "SHEETS_SEPARATE").toUpperCase();
+        String mode = config.get("merge.mode", "SHEETS_SEPARATE").toUpperCase(Locale.ROOT);
         if (!VALID_MERGE_MODES.contains(mode)) {
-            errors.add("merge.mode: valor invalido '" + mode + "'. Valores permitidos: "
+            errors.add("merge.mode: valor invalido '" + mode + MSG_SUFFIX_ALLOWED_VALUES
                     + VALID_MERGE_MODES);
             return "SHEETS_SEPARATE";
         }
@@ -207,7 +217,7 @@ public class ConfigValidator {
             errors.add("mes.sourceSheet: requerido cuando mes.enabled=true.");
         } else if (!knownSheets.contains(sourceSheet)) {
             errors.add("mes.sourceSheet: referencia a hoja desconocida '" + sourceSheet
-                    + "'. Hojas conocidas: " + knownSheets + ".");
+                    + MSG_SUFFIX_KNOWN_SHEETS + knownSheets + ".");
         }
 
         if (isBlank(config.get("mes.anchorColumn", ""))) {
@@ -222,10 +232,10 @@ public class ConfigValidator {
         List<MesColInfo> cols = new ArrayList<>();
         int i = 1;
         while (true) {
-            String name = config.get("mes.col." + i + ".name", null);
+            String name = config.get(PROP_PREFIX_MES_COL + i + ".name", null);
             if (name == null || name.trim().isEmpty()) break;
-            String typeRaw = config.get("mes.col." + i + ".type", "EMPTY");
-            String type = typeRaw == null ? "" : typeRaw.trim().toUpperCase();
+            String typeRaw = config.get(PROP_PREFIX_MES_COL + i + ".type", "EMPTY");
+            String type = typeRaw == null ? "" : typeRaw.trim().toUpperCase(Locale.ROOT);
             cols.add(new MesColInfo(i, name.trim(), type));
             i++;
         }
@@ -238,16 +248,16 @@ public class ConfigValidator {
         Set<String> colNames = new LinkedHashSet<>();
         for (MesColInfo c : cols) {
             if (!colNames.add(c.name)) {
-                errors.add("mes.col." + c.idx + ".name: nombre duplicado '" + c.name
+                errors.add(PROP_PREFIX_MES_COL + c.idx + ".name: nombre duplicado '" + c.name
                         + "' (ya existe en otra columna MES).");
             }
         }
 
         for (MesColInfo c : cols) {
-            String prefix = "mes.col." + c.idx + ".";
+            String prefix = PROP_PREFIX_MES_COL + c.idx + ".";
             if (!VALID_COL_TYPES.contains(c.type)) {
                 errors.add(prefix + "type: valor invalido '" + c.type
-                        + "'. Valores permitidos: " + VALID_COL_TYPES + ".");
+                        + MSG_SUFFIX_ALLOWED_VALUES + VALID_COL_TYPES + ".");
                 continue; // no tiene sentido seguir validando esta columna
             }
             switch (c.type) {
@@ -296,10 +306,10 @@ public class ConfigValidator {
     private void validateFill(String prefix, String colName) {
         String fill = config.get(prefix + "fill", null);
         if (fill == null || fill.trim().isEmpty()) return;
-        String normalized = fill.trim().toUpperCase();
+        String normalized = fill.trim().toUpperCase(Locale.ROOT);
         if (!VALID_FILL_COLORS.contains(normalized)) {
             errors.add(prefix + "fill: color desconocido '" + fill + "' en '" + colName
-                    + "'. Valores permitidos: " + VALID_FILL_COLORS + ".");
+                    + MSG_SUFFIX_ALLOWED_VALUES + VALID_FILL_COLORS + ".");
         }
     }
 
@@ -351,10 +361,10 @@ public class ConfigValidator {
         for (String id : ids) {
             String prefix = "sheet." + id + ".";
             String typeRaw = config.get(prefix + "type", "FORMULAS");
-            String type = typeRaw == null ? "" : typeRaw.trim().toUpperCase();
+            String type = typeRaw == null ? "" : typeRaw.trim().toUpperCase(Locale.ROOT);
             if (!VALID_DERIVED_TYPES.contains(type)) {
                 errors.add(prefix + "type: valor invalido '" + type
-                        + "' para hoja derivada '" + id + "'. Valores permitidos: "
+                        + "' para hoja derivada '" + id + MSG_SUFFIX_ALLOWED_VALUES
                         + VALID_DERIVED_TYPES + ".");
                 continue;
             }
@@ -384,10 +394,10 @@ public class ConfigValidator {
                 }
 
                 String agg = config.get(prefix + "aggregation", "SUM");
-                String aggNorm = agg == null ? "" : agg.trim().toUpperCase();
+                String aggNorm = agg == null ? "" : agg.trim().toUpperCase(Locale.ROOT);
                 if (!VALID_AGG_FUNCS.contains(aggNorm)) {
                     errors.add(prefix + "aggregation: valor invalido '" + agg + "' para '" + id
-                            + "'. Valores permitidos: " + VALID_AGG_FUNCS + ".");
+                            + MSG_SUFFIX_ALLOWED_VALUES + VALID_AGG_FUNCS + ".");
                 }
 
                 Integer headerRow = parsePositiveInt(prefix + "headerRow", 1);
@@ -412,7 +422,7 @@ public class ConfigValidator {
             errors.add("summary.sheetName: valor requerido cuando summary.enabled=true.");
         } else if (knownSheets.contains(sheetName)) {
             errors.add("summary.sheetName: colisiona con otra hoja conocida '"
-                    + sheetName + "'. Hojas conocidas: " + knownSheets + ".");
+                    + sheetName + MSG_SUFFIX_KNOWN_SHEETS + knownSheets + ".");
         }
 
         String sumSheet = config.get("summary.sumSheet", "");
@@ -420,7 +430,7 @@ public class ConfigValidator {
             errors.add("summary.sumSheet: valor requerido (normalmente mes.sheetName).");
         } else if (!knownSheets.contains(sumSheet)) {
             errors.add("summary.sumSheet: referencia a hoja desconocida '" + sumSheet
-                    + "'. Hojas conocidas: " + knownSheets + ".");
+                    + MSG_SUFFIX_KNOWN_SHEETS + knownSheets + ".");
         }
 
         if (isBlank(config.get("summary.matriculaColumn", ""))) {
@@ -522,14 +532,14 @@ public class ConfigValidator {
             errors.add("mes.orphans.sourceSheet: valor requerido cuando mes.orphans.enabled=true.");
         } else if (!knownSheets.contains(sourceSheet)) {
             errors.add("mes.orphans.sourceSheet: referencia a hoja desconocida '"
-                    + sourceSheet + "'. Hojas conocidas: " + knownSheets + ".");
+                    + sourceSheet + MSG_SUFFIX_KNOWN_SHEETS + knownSheets + ".");
         }
 
         // Recolectar los nombres de columna MES para validar las claves col*
         Set<String> mesColNames = new LinkedHashSet<>();
         int i = 1;
         while (true) {
-            String name = config.get("mes.col." + i + ".name", null);
+            String name = config.get(PROP_PREFIX_MES_COL + i + ".name", null);
             if (name == null || name.trim().isEmpty()) break;
             mesColNames.add(name.trim());
             i++;

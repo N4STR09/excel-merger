@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.Locale;
 
 /**
  * Detecta si un fichero esta "bloqueado" en el sentido Excel: abierto por
@@ -18,6 +19,9 @@ import java.io.IOException;
  */
 public final class FileLockDetector {
 
+    /** Prefijo común de los mensajes de error cuando un fichero está bloqueado. */
+    private static final String MSG_CLOSE_PREFIX = "Cierra '";
+
     /**
      * Comprueba que un archivo de entrada es accesible para lectura.
      * Si esta abierto en Excel (lock file ~$..., o error de bloqueo del OS),
@@ -29,7 +33,7 @@ public final class FileLockDetector {
         if (parent != null) {
             File lock = new File(parent, "~$" + f.getName());
             if (lock.exists()) {
-                throw new InputValidationException("Cierra '" + f.getName()
+                throw new InputValidationException(MSG_CLOSE_PREFIX + f.getName()
                         + "' antes de ejecutar (parece abierto en Excel: existe el lock '"
                         + lock.getName() + "').");
             }
@@ -39,13 +43,13 @@ public final class FileLockDetector {
             probe.read();
         } catch (FileNotFoundException e) {
             if (looksLikeLocked(e)) {
-                throw new InputValidationException("Cierra '" + f.getName()
+                throw new InputValidationException(MSG_CLOSE_PREFIX + f.getName()
                         + "' antes de ejecutar (parece abierto en Excel).", e);
             }
             throw new InputValidationException("No se puede leer '" + f.getName() + "': " + e.getMessage(), e);
         } catch (IOException e) {
             if (looksLikeLocked(e)) {
-                throw new InputValidationException("Cierra '" + f.getName()
+                throw new InputValidationException(MSG_CLOSE_PREFIX + f.getName()
                         + "' antes de ejecutar (parece abierto en Excel).", e);
             }
             throw new InputValidationException("No se puede leer '" + f.getName() + "': " + e.getMessage(), e);
@@ -62,7 +66,7 @@ public final class FileLockDetector {
             return new FileInputStream(f);
         } catch (FileNotFoundException e) {
             if (looksLikeLocked(e)) {
-                throw new InputValidationException("Cierra '" + f.getName()
+                throw new InputValidationException(MSG_CLOSE_PREFIX + f.getName()
                         + "' antes de ejecutar (parece abierto en Excel).", e);
             }
             throw new InputValidationException("No se puede abrir '" + f.getName() + "': " + e.getMessage(), e);
@@ -78,7 +82,7 @@ public final class FileLockDetector {
         while (cur != null) {
             String msg = cur.getMessage();
             if (msg != null) {
-                String low = msg.toLowerCase();
+                String low = msg.toLowerCase(Locale.ROOT);
                 if (low.contains("being used by another process")
                         || low.contains("used by another process")
                         || low.contains("the process cannot access")

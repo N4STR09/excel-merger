@@ -1,5 +1,81 @@
 # Changelog
 
+## [2.0.1] — Segunda vuelta de limpieza PMD
+
+Release patch. Sin cambios funcionales, sin cambios de API pública, sin cambios de configuración. Se atacan las exclusiones del `pmd-ruleset.xml` que en 2.0.0 se habían anotado como "para segunda pasada", dejando solo las que responden a decisiones arquitectónicas conscientes.
+
+⚠️ **Nota de validación**: esta release se preparó en un entorno sin acceso a Maven Central. `mvnw verify` **no ha sido ejecutado** para certificar la release. Los cambios están validados por (a) compilación limpia con `javac` contra el uber-jar, (b) análisis manual replicando la semántica de cada regla PMD, y (c) comprobación estática de que ningún test existente referencia los símbolos renombrados. Antes de publicar, correr `mvnw verify` localmente y confirmar verde.
+
+### Corregido
+
+- **`UseLocaleWithCaseConversions`** — 20 ocurrencias. Todas las llamadas a `.toLowerCase()` y `.toUpperCase()` sin argumento se convirtieron a `Locale.ROOT`. Dominio de todas las llamadas: identificadores internos ASCII (tipos, agregaciones, nombres de columna, colores, extensiones de fichero), no texto de usuario — `Locale.ROOT` es correcto y seguro. Ficheros afectados: `ConfigValidator`, `DerivedSheetBuilder`, `FileProfileResolver`, `MesSheetBuilder`, `FileLockDetector`, `InputFileDetector`, `FormulaColumnStrategy`, `MesColumnStrategyFactory`. Se añade `import java.util.Locale;` donde hacía falta. La exclusión desaparece del ruleset.
+
+  *Nota*: el comentario del ruleset 2.0.0 decía "19 ocurrencias"; el conteo real era 20 — una línea de `FileProfileResolver` tenía dos llamadas encadenadas (`actual.toLowerCase().contains(expected.toLowerCase())`) que se contaban como una.
+
+- **`AssignmentInOperand`** — 5 ocurrencias. Los dos `guard++ < 50` en las condiciones de `while` de `FormulaColumnStrategy` se extrajeron a `guard++` al inicio del cuerpo (semántica preservada: mismas 50 iteraciones máximas). Los tres `sheet.createRow(rowIdx++)` (en `LookupSheetBuilder`, `AvisosSheetBuilder` y `ExcelMerger`) se separaron en dos líneas: `createRow(rowIdx)` seguido de `rowIdx++`. La exclusión desaparece del ruleset.
+
+- **`AvoidDuplicateLiterals`** — Se combinó extracción de constantes para 7 literales de dominio con configuración de la regla para filtrar los 3 restantes, que son ruido de concatenación (`"')."`, `",\""`, `"SUM("`) y al extraerlos a constante producirían nombres sin significado.
+
+  Constantes extraídas (con 10 usos en total sustituidos para `CABECERA` que aparece en dos clases):
+
+  | Clase | Constante | Literal | Usos |
+  |---|---|---|---|
+  | `StyleFactory` | `FONT_CALIBRI` | `"Calibri"` | 5 |
+  | `DerivedSheetBuilder` | `WARN_CATEGORY_CONFIG` | `"CONFIG"` | 5 |
+  | `LookupSheetBuilder` | `WARN_CATEGORY_LOOKUP` | `"LOOKUP"` | 4 |
+  | `MesSheetBuilder` | `WARN_CATEGORY_CABECERA` | `"CABECERA"` | 5 |
+  | `SummarySheetBuilder` | `WARN_CATEGORY_CABECERA` | `"CABECERA"` | 5 |
+  | `ConfigValidator` | `PROP_PREFIX_MES_COL` | `"mes.col."` | 5 |
+  | `ConfigValidator` | `MSG_SUFFIX_KNOWN_SHEETS` | `"'. Hojas conocidas: "` | 4 |
+  | `ConfigValidator` | `MSG_SUFFIX_ALLOWED_VALUES` | `"'. Valores permitidos: "` | 5 |
+  | `Main` | `BANNER_SEPARATOR` | `"====================================` | 8 |
+  | `FileLockDetector` | `MSG_CLOSE_PREFIX` | `"Cierra '"` | 4 |
+  | `MesSheetBuilder` | `MSG_SUFFIX_MES_SKIPPED` | `"'. MES omitida."` | 5 |
+  | `SummarySheetBuilder` | `MSG_COL_NOT_FOUND_IN` | `"' no encontrada en '"` | 5 |
+
+  La regla queda activa en el ruleset con `minimumLength=5`, que filtra los 3 literales cortos restantes sin necesidad de `exceptionList`. `maxDuplicateLiterals=4` y `skipAnnotations=true` (defaults explícitos para legibilidad del ruleset).
+
+### Documentado (exclusiones cuya justificación se mejoró)
+
+- **`AvoidCatchingGenericException`** — exclusión mantenida con comentario reforzado. Los 5 `catch (Exception)` en `DerivedSheetBuilder` (2), `FileProfileResolver` (1), `Main` (1) y un `catch (Exception ignored)` en `autoSizeColumn` son todos defensivos contra POI. `evaluateAll()`, `autoSizeColumn()` y rutinas similares pueden lanzar varias subclases de `RuntimeException` no declaradas en su firma (POI no las documenta consistentemente), y `RuntimeException` también está marcada por esta regla en PMD 7.x (confirmado en docs), así que cambiar a `catch (RuntimeException)` no resolvería. La exclusión es la respuesta correcta. *Nota técnica*: desde PMD 7.18.0 esta regla se movió de `category/java/design.xml` a `category/java/errorprone.xml`; el ruleset ahora la excluye solo una vez, en la categoría correcta.
+
+- **Complejidad / tamaño de clase / acoplamiento** — exclusiones mantenidas con nota arquitectónica. Afecta a los tres orquestadores grandes (`MesSheetBuilder` 772 LoC, `SummarySheetBuilder` 664 LoC, `ConfigValidator` 607 LoC). Cada uno encapsula una transformación Excel completa con múltiples casos de negocio; partirlos en colaboradores pequeños fragmentaría la lógica de dominio sin ganar mantenibilidad real porque cada sub-pieza solo tiene sentido en el contexto del orquestador. Objetivo de una futura **Sesión F** si se decide abordar, no de limpieza PMD. Reglas afectadas: `CognitiveComplexity`, `CyclomaticComplexity`, `NPathComplexity`, `NcssCount`, `CouplingBetweenObjects`, `ExcessiveImports`, `ExcessiveParameterList`, `ExcessivePublicCount`, `GodClass`, `TooManyFields`, `TooManyMethods`.
+
+- **`DataClass`** — exclusión mantenida. `RunReport` y `VlookupLink` son objetos de valor intencionales; `DataClass` es el patrón correcto para ellos.
+
+- **`LawOfDemeter`** — exclusión mantenida. POI requiere cadenas tipo `row.getCell(i).getStringCellValue()`; respetar Demeter exigiría envolver POI entero, cambio de envergadura que no pertenece a una limpieza PMD.
+
+### Retirado del ruleset (eran exclusiones de 0 violaciones)
+
+Cuatro exclusiones resultaron no cubrir ninguna violación real: el código había dejado de disparar la regla desde que se escribió la exclusión o directamente nunca la disparó. Se retiran del `<exclude>` sin cambio alguno en código:
+
+- **`AvoidThrowingRawExceptionTypes`** — 0 `throw new RuntimeException(...)` en todo src/main.
+- **`SignatureDeclareThrowsException`** — 0 `throws Exception` en firmas de método.
+- **`UseUtilityClass`** — las tres clases utility (`Main`, `PoiUtils`, `StyleFactory`) ya tienen constructor privado desde antes.
+- **`LoosePackageCoupling`** — es no-op sin configurar la propiedad `packages`; estaba excluida sin razón.
+
+### Pendiente para futura Sesión F (refactor arquitectónico)
+
+No es trabajo de limpieza PMD, sino decisión de diseño. Si se aborda, el objetivo sería partir los orquestadores grandes en colaboradores más pequeños — lo cual haría que desaparecieran automáticamente del ruleset las 11 exclusiones del bloque "Complejidad / tamaño / acoplamiento" enumeradas arriba.
+
+### Cambios en ficheros (resumen)
+
+- `pom.xml`: `<version>` a `2.0.1`.
+- `src/main/java/com/excelmerger/Main.java`: `APP_VERSION` a `"2.0.1"`, constante `BANNER_SEPARATOR` añadida (8 sustituciones).
+- `src/test/java/com/excelmerger/MainTest.java`: assertion de versión actualizado.
+- 9 ficheros Java tocados para `Locale.ROOT` (entre `src/main/java/com/excelmerger/` y sub-paquetes).
+- 4 ficheros Java tocados para `AssignmentInOperand`.
+- 7 ficheros Java tocados para `AvoidDuplicateLiterals`.
+- `pmd-ruleset.xml`: reescrito con los cambios descritos.
+- `CHANGELOG.md`: esta entrada.
+
+### Versiones
+
+- `2.0.0` → `2.0.1`
+- `APP_VERSION` bumpeado en código y test.
+
+---
+
 ## [2.0.0] — BREAKING: swap de nombres de perfil Extraccion ↔ Cierre
 
 Release mayor. Se intercambian los nombres internos de los dos perfiles de detección de ficheros para que coincidan con los nombres habituales de los ficheros de entrada del usuario. Hasta 1.8.1, los nombres internos eran contraintuitivos:

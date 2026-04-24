@@ -43,8 +43,10 @@ public final class Main {
 
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final String APP_NAME = "Excel Merger";
-    static final String APP_VERSION = "2.0.0";
+    static final String APP_VERSION = "2.0.1";
     private static final String GIT_PROPERTIES_PATH = "/git.properties";
+    /** Separador visual usado en los banners del log. */
+    private static final String BANNER_SEPARATOR = "====================================";
 
     // Exit codes (mantenidos compatibles con versiones anteriores: 0, 1, 2)
     static final int EXIT_OK               = 0;
@@ -77,9 +79,9 @@ public final class Main {
                 .orElse(null);
 
         Instant start = Instant.now();
-        log.info("====================================");
+        log.info(BANNER_SEPARATOR);
         log.info("   {} v{}", APP_NAME, APP_VERSION);
-        log.info("====================================");
+        log.info(BANNER_SEPARATOR);
 
         RunReport report = new RunReport();
         int exitCode;
@@ -94,9 +96,9 @@ public final class Main {
             List<String> errors = new ConfigValidator(config).validate();
             if (!errors.isEmpty()) {
                 if (strict) {
-                    log.error("====================================");
+                    log.error(BANNER_SEPARATOR);
                     log.error("   CONFIGURACION INVALIDA ({} error(es))", errors.size());
-                    log.error("====================================");
+                    log.error(BANNER_SEPARATOR);
                     for (String err : errors) {
                         log.error("  - {}", err);
                     }
@@ -118,14 +120,14 @@ public final class Main {
 
             Duration elapsed = Duration.between(start, Instant.now());
             log.info(report.formatSummary(elapsed));
-            log.info("====================================");
+            log.info(BANNER_SEPARATOR);
             if (dryRun) {
                 log.info("   PROCESO FINALIZADO OK (DRY-RUN, {} ms)", elapsed.toMillis());
                 log.info("   [DRY-RUN] No se ha escrito el Excel de salida ni se ha movido ningun backup.");
             } else {
                 log.info("   PROCESO FINALIZADO OK ({} ms)", elapsed.toMillis());
             }
-            log.info("====================================");
+            log.info(BANNER_SEPARATOR);
             exitCode = EXIT_OK;
 
         } catch (ConfigurationException e) {
@@ -146,9 +148,9 @@ public final class Main {
     private static int logAndExit(Instant start, RunReport report, Exception e,
                                   String banner, int code) {
         Duration elapsed = Duration.between(start, Instant.now());
-        log.error("====================================");
+        log.error(BANNER_SEPARATOR);
         log.error("   {}", banner);
-        log.error("====================================");
+        log.error(BANNER_SEPARATOR);
         log.error("Mensaje: {}", e.getMessage(), e);
         log.info(report.formatSummary(elapsed));
         return code;
