@@ -1,5 +1,83 @@
 # Changelog
 
+## [2.3.0] — Modos de generación (`output.mode`)
+
+Release minor. Añade la clave `output.mode` para seleccionar **qué hojas se generan** en el libro de salida. Tres modos:
+
+- `cierre` (**default**, preserva 100% el comportamiento de v2.2.0): genera `Cierre`, `Extraccion`, `Deuda` (si el usuario aporta el 3er fichero), `Equipos` (oculta), `Resultado` y `Resumen`.
+- `responsables`: genera `Cierre`, `Extraccion`, `Equipos` (oculta), `Resultado` y **N hojas vacías**, una por cada responsable distinto que aparezca en `Resultado.Res. Tecnico`. **NO** genera `Deuda` (la copia del input se omite explícitamente) ni `Resumen`.
+- `completo`: la suma de los dos: todas las hojas de `cierre` + las hojas por responsable.
+
+Si la clave está ausente o vacía se asume `cierre`, así que **ningún config existente requiere modificación** y todo el comportamiento de v2.2.0 queda preservado.
+
+⚠️ **Nota de validación**: esta release se preparó en un entorno sin acceso a Maven Central. `mvnw verify` **no ha sido ejecutado** para certificar la release. Los cambios están validados por: (a) revisión línea a línea del código nuevo (`OutputMode`, `ResponsablesSheetBuilder`, switch en `ExcelMerger.merge`); (b) tests unitarios nuevos (`OutputModeTest`, `ResponsablesSheetBuilderTest`) y de integración (8 tests añadidos a `ExcelMergerIntegrationTest`); (c) confirmación de que los tests v2.2.0 cargan ahora `output.mode=cierre` (default) y por tanto siguen verdes sin tocar aserciones. Antes de publicar, correr `./mvnw verify` localmente y confirmar tests verdes y cobertura ≥70%.
+
+### Semántica acordada (Fase 0)
+
+Decisiones cerradas con el usuario antes de tocar código:
+
+1. **Validación del valor de `mode`**: opción (c) del plan — ausente o vacío → `cierre`; presente con valor inválido → error de validación que `ConfigValidator` reporta listando los 3 válidos. Comparación **case-sensitive estricta en minúsculas**: `Cierre`, `CIERRE`, `Responsables` son inválidos. Misma convención que el resto del proyecto para enums (`merge.mode` valida en mayúsculas estrictas).
+2. **Orden de hojas en modo `responsables`**: opción (a) del plan — `Equipos` (oculta) se queda en su posición histórica entre los inputs y `Resultado` (no se reordena). Las hojas por responsable van **al final**, ordenadas alfabéticamente con `Collator es_ES PRIMARY` (tildes y mayúsculas se tratan igual que un humano espera).
+3. **Orden de hojas en modo `completo`**: misma decisión que en (2) — `Equipos` no se mueve. Las hojas por responsable van **después** de `Resumen`, al final del libro.
+4. **Saneo de nombres de hoja**: opción (c) del plan — caracteres prohibidos (`\ / ? * [ ] :`) reemplazados por `_` y truncado a 31 chars (reutiliza `FileProfileResolver.safeSheetName`, ya existente). Si el saneo modifica el nombre, warning categoría `RESPONSABLE`. Si tras sanear hay colisión con otra hoja, sufijo `_2`, `_3`, ... (reutiliza `FileProfileResolver.ensureUniqueSheetName`, **movido en esta release** desde `ExcelMerger`).
+5. **Cabecera de cada hoja por responsable**: opción (a) del plan — solo celda `A1` con el **nombre canónico del responsable** (no el saneado), aplicando el estilo `StyleFactory.title()` (negrita, 14 pt). Sin filas reservadas para futuros encabezados; cuando se añadan las dos tablas de resumen en una sesión posterior, ya se decidirá su layout.
+6. **Detección de responsables únicos**: opción (b) del plan — **trim + case-insensitive**. Valores como `tresp1@x`, `TRESP1@x`, `  tresp1@x  ` colapsan en una única hoja. El **nombre canónico** (en `A1` y como nombre de hoja) es el **primer literal visto** en orden de filas de `Resultado`. Coherente con cómo `summary.byResponsible` ya normaliza responsables en v1.8.0+ para la segunda tabla de Resumen.
+7. **Diff entre ejecuciones de modos distintos**: el usuario aclaró que **no existe ninguna feature de Diff** en v2.2.0; pregunta omitida.
+8. **Tests existentes**: como `cierre` es default y los configs del proyecto añaden `output.mode=cierre` explícito, **ningún test existente requiere modificación de aserciones**. Se confirmó por inspección de `ExcelMergerIntegrationTest` (incluida la aserción estricta `wb.getNumberOfSheets() == 5` del happy path).
+
+Decisiones colaterales tomadas en Fase 1:
+
+- **Nombre de la clave**: `output.mode` (no `mode` a secas) por simetría con `output.file`, `output.overwrite`, `output.backup`.
+- **Validación**: en `ConfigValidator.validateOutputMode()` (acumula error en la lista de errores), simétrico a `validateMergeMode`. Con `config.strictValidation=true` (default) aborta con exit code 2; con `strictValidation=false` el motor cae a `cierre` defensivamente.
+- **Lectura del valor de `Res. Tecnico`**: directo con `Cell.getStringCellValue()` + `trim()`, **sin** construir `FormulaEvaluator`. Justificado: la columna `mes.col.9` es de tipo `COPY` desde `Usuario_Resp_Tecnico`, que ya viene casteado a STRING y trimado en la copia de `profile.Cierre` (`asText.columns` + `trim.columns`).
+- **Omisión de Deuda en modo `responsables`**: lectura literal del prompt original ("Sin Deuda"). Se omite la **copia del input** `deuda.xlsx` al libro de salida (`mergeSheetsSeparate` filtra perfiles `Deuda` cuando `outputMode == RESPONSABLES`), con warning CONFIG. Las fórmulas `PDCL + Deuda` en `Resultado` se degradan automáticamente al modo "sin hoja Deuda" (devuelven `{col:PDCL}`, sin warning) gracias al comportamiento existente de `FormulaPlusSumIfsColumnStrategy` v2.2.0.
+- **`DerivedSheetBuilder`**: ortogonal al modo. Se invoca en los 3 modos. Con `derived.sheets=` vacío (default real) es no-op.
+
+### Añadido
+
+- **Nuevo enum `OutputMode`** en `src/main/java/com/excelmerger/OutputMode.java` con tres valores `CIERRE`, `RESPONSABLES`, `COMPLETO` y método `parseStrict(String)` (case-sensitive, solo minúsculas, lanza `IllegalArgumentException` con mensaje listando los válidos).
+- **Nuevo builder `ResponsablesSheetBuilder`** en `src/main/java/com/excelmerger/ResponsablesSheetBuilder.java`. Lee `Resultado.Res. Tecnico` (nombre de hoja vía `mes.sheetName`, columna vía `summary.byResponsible.column`), agrupa los valores por minúscula tras trim, ordena alfabéticamente con `Collator es_ES PRIMARY`, sanea nombres con `FileProfileResolver.safeSheetName`, resuelve colisiones con `FileProfileResolver.ensureUniqueSheetName`, y crea una hoja por cada responsable canónico con `A1` = nombre canónico en estilo `title`.
+- **Validación `validateOutputMode()`** en `ConfigValidator`. Acumula error en la lista de errores si el valor no es uno de los tres válidos (estricto, case-sensitive). Ausente o vacío no es error.
+- **Switch de modos en `ExcelMerger.merge()`** (alrededor de las líneas 5f–5f-bis): omite `SummarySheetBuilder` en `RESPONSABLES`, invoca `ResponsablesSheetBuilder` en `RESPONSABLES` y `COMPLETO`, omite la copia del input Deuda en `RESPONSABLES`.
+- **`RunReport.setOutputMode/getOutputMode`** y línea `Modo: <MODO>` en el resumen final.
+- **Clave `output.mode=cierre`** explícita en los tres `config.properties` (raíz, `src/main/resources/`, `src/test/resources/test-config.properties`) con bloque de comentarios documentando los 3 valores.
+- **Tests unitarios nuevos**:
+  - `OutputModeTest`: 5 tests sobre `parseStrict` (3 valores válidos, mayúsculas rechazadas, valores inventados, null, mensaje de error completo).
+  - `ResponsablesSheetBuilderTest`: ~13 tests que cubren Resultado vacío, ausente, sin columna `Res. Tecnico`, 3 responsables → 3 hojas, valores vacíos/sólo espacios ignorados, case-folding (`tresp1@x` y `TRESP1@x` colapsan), trim, contenido de `A1`, estilo título, saneo de caracteres prohibidos, truncado a 31 chars, colisiones con sufijo `_2`, orden alfabético con Collator (case-insensitive), registro en `RunReport`.
+- **Tests de integración nuevos** (`ExcelMergerIntegrationTest`): 8 tests para los 3 modos:
+  - `outputModeCierreEsElDefault…`: estructura idéntica a v2.2.0 con 5 hojas.
+  - `outputModeResponsablesGeneraHojasPorResponsable…`: presencia de hojas `tresp1@x`, `tresp2@x`, `tresp3@x`, `MG002` (tras trim) y ausencia de `Resumen`.
+  - `outputModeResponsablesPosicionaHojasResponsableTrasResultado`: orden relativo (índices > Resultado).
+  - `outputModeResponsablesOmiteCopiaDeDeuda…`: con `deuda.xlsx` en input, la hoja `Deuda` no aparece en output, fórmula `PDCL+Deuda` no contiene `Deuda!`, warning `CONFIG` emitido.
+  - `outputModeCompletoIncluyeTodasLasHojas…`: Cierre, Extraccion, Deuda, Equipos, Resultado, Resumen, y las hojas por responsable.
+  - `outputModeCompletoPosicionaResponsablesTrasResumen`: orden relativo.
+  - `outputModeQuedaRegistradoEnRunReport`: `report.getOutputMode()` y línea `Modo:` en el summary.
+  - `outputModeInvalidoProduceErrorEnConfigValidator` y `outputModeInvalidoConStrictValidationFalseCaeACierre`: validación y degradación defensiva.
+- **Tests añadidos a `ConfigValidatorTest`**: 8 nuevos casos para `output.mode` (ausente, vacío, los 3 válidos, mayúsculas rechazadas, valor inventado, mensaje listando los 3 válidos).
+
+### Cambiado
+
+- **`FileProfileResolver.ensureUniqueSheetName`**: nuevo método **público estático**. **Movido** desde `ExcelMerger` (donde era `private`). Comportamiento idéntico, cero cambios funcionales. El método antiguo en `ExcelMerger` queda como **wrapper privado** de una sola línea para minimizar diff de los callsites internos.
+- **`ExcelMerger.mergeSheetsSeparate`**: firma extendida con un parámetro `OutputMode`. Cuando es `RESPONSABLES`, los inputs cuyo perfil resuelto es `Deuda` se omiten de la copia (con log + warning `CONFIG`). El único callsite (la línea 207 de `merge()`) se actualizó. La lógica de orden de perfiles (`computeProfileOrder`) y de copia (`copyAllSheetsFrom`) no cambia.
+- **`TestFixtures`**: dos helpers nuevos `buildRealisticConfigWithOutputMode(baseDir, mode)` y `buildRealisticConfigWithDeudaAndOutputMode(baseDir, mode)` que renderizan el `test-config.properties` y luego sobreescriben/insertan la línea `output.mode=<mode>` con regex multilínea. El helper original `buildRealisticConfig` no cambia y sigue alimentando todos los tests v2.2.0 con `output.mode=cierre` (default explícito en `test-config.properties`).
+- **`Main.APP_VERSION`** → `2.3.0`. **`pom.xml` `<version>`** → `2.3.0`.
+
+### Notas de no-regresión
+
+- **0 cambios en builders existentes**: `MesSheetBuilder`, `LookupSheetBuilder`, `SummarySheetBuilder`, `DerivedSheetBuilder`, `AvisosSheetBuilder` no se tocan. La selección de qué builders invocar vive en el switch de `ExcelMerger.merge()`.
+- **0 cambios en aserciones de tests existentes**. Verificado por inspección: la aserción estricta `wb.getNumberOfSheets() == 5` del happy path, las verificaciones de orden de Deuda/Resultado, y todas las pruebas de fórmulas SUMIFS, asumen modo `cierre` implícitamente — y `cierre` es el default tanto en runtime como en `test-config.properties`.
+- **0 cambios en formatos de columna o fórmulas de `Resultado`**. Las hojas por responsable son completamente independientes; no afectan a la construcción de `Resultado` ni a sus fórmulas SUMIFS.
+- **`--dry-run`** funciona idéntico: las hojas en memoria se construyen igual; `outputManager.writeResult` se sigue saltando.
+
+### Riesgos conocidos al cierre
+
+- `mvnw verify` no se ejecutó. Hay que ejecutarlo localmente. Posibles puntos de fricción en orden de probabilidad decreciente:
+  1. Algún test de integración v2.2.0 que asume el orden absoluto de las hojas (no detectado en la auditoría manual, pero no se puede descartar al 100% sin runner).
+  2. Alguna violación menor de Checkstyle/PMD en el código nuevo (line length verificado a 140; sin tabs verificado; resto sin auditar exhaustivamente).
+  3. Diferencias entre el `Collator es_ES PRIMARY` y el orden esperado en algún test si el JDK del runner tuviera comportamiento particular (improbable: PRIMARY es estable entre JDKs para alfabeto latino básico).
+
+---
+
 ## [2.2.0] — Fichero de Deuda opcional (suma real en `PDCL + Deuda`)
 
 Release minor. Añade soporte para un **tercer fichero Excel opcional** en el directorio de entrada que aporta horas de deuda por `(Peticion, Matricula, Funcion)`. Cuando está presente, la columna `PDCL + Deuda` de `Resultado` deja de ser igual a `PDCL` y pasa a sumar las horas cruzadas desde la nueva hoja `Deuda`. Cuando no está, el comportamiento es **idéntico** a v2.1.0: `PDCL + Deuda == PDCL`, sin warnings.

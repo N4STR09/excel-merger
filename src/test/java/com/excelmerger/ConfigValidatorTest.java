@@ -84,6 +84,85 @@ class ConfigValidatorTest {
     }
 
     // ==================================================================
+    //  output.mode (v2.3.0)
+    // ==================================================================
+
+    @Test
+    void outputModeAusenteNoEsError() {
+        // El default ausente equivale a 'cierre' aplicado en runtime; aqui
+        // solo validamos que la ausencia NO se reporta como error.
+        Properties p = minimalValid();
+        // sin output.mode
+        List<String> errors = validatorFor(p).validate();
+        assertThat(errors)
+                .noneMatch(e -> e.contains("output.mode"));
+    }
+
+    @Test
+    void outputModeVacioNoEsError() {
+        Properties p = minimalValid();
+        p.setProperty("output.mode", "");
+        List<String> errors = validatorFor(p).validate();
+        assertThat(errors)
+                .noneMatch(e -> e.contains("output.mode"));
+    }
+
+    @Test
+    void outputModeCierreEsValido() {
+        Properties p = minimalValid();
+        p.setProperty("output.mode", "cierre");
+        List<String> errors = validatorFor(p).validate();
+        assertThat(errors).noneMatch(e -> e.contains("output.mode"));
+    }
+
+    @Test
+    void outputModeResponsablesEsValido() {
+        Properties p = minimalValid();
+        p.setProperty("output.mode", "responsables");
+        List<String> errors = validatorFor(p).validate();
+        assertThat(errors).noneMatch(e -> e.contains("output.mode"));
+    }
+
+    @Test
+    void outputModeCompletoEsValido() {
+        Properties p = minimalValid();
+        p.setProperty("output.mode", "completo");
+        List<String> errors = validatorFor(p).validate();
+        assertThat(errors).noneMatch(e -> e.contains("output.mode"));
+    }
+
+    @Test
+    void outputModeMayusculasEsError() {
+        // Comparacion case-sensitive estricta: "Cierre", "CIERRE" no validos.
+        Properties p = minimalValid();
+        p.setProperty("output.mode", "Cierre");
+        List<String> errors = validatorFor(p).validate();
+        assertThat(errors).anyMatch(e -> e.contains("output.mode") && e.contains("Cierre"));
+    }
+
+    @Test
+    void outputModeValorInventadoEsError() {
+        Properties p = minimalValid();
+        p.setProperty("output.mode", "foo");
+        List<String> errors = validatorFor(p).validate();
+        assertThat(errors).anyMatch(e -> e.contains("output.mode") && e.contains("foo"));
+    }
+
+    @Test
+    void outputModeInvalidoListaLosTresValoresValidos() {
+        Properties p = minimalValid();
+        p.setProperty("output.mode", "xxx");
+        List<String> errors = validatorFor(p).validate();
+        String error = errors.stream()
+                .filter(e -> e.contains("output.mode"))
+                .findFirst().orElseThrow();
+        assertThat(error)
+                .contains("cierre")
+                .contains("responsables")
+                .contains("completo");
+    }
+
+    // ==================================================================
     //  Perfiles
     // ==================================================================
     @Test

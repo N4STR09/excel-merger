@@ -41,6 +41,9 @@ public class ConfigValidator {
             Arrays.asList("SUM", "AVG", "COUNT", "MIN", "MAX"));
     private static final Set<String> VALID_MERGE_MODES = new LinkedHashSet<>(
             Arrays.asList("SHEETS_SEPARATE", "APPEND_ROWS"));
+    /** v2.3.0: valores permitidos para {@code output.mode}. Case-sensitive, minusculas. */
+    private static final Set<String> VALID_OUTPUT_MODES = new LinkedHashSet<>(
+            Arrays.asList("cierre", "responsables", "completo"));
     private static final Set<String> VALID_FILL_COLORS = new LinkedHashSet<>(
             Arrays.asList("LIGHT_GREEN", "MEDIUM_GREEN", "LIGHT_BLUE",
                     "LIGHT_YELLOW", "LIGHT_RED", "LIGHT_LAVENDER"));
@@ -73,6 +76,7 @@ public class ConfigValidator {
 
         validateInputOutput();
         String mergeMode = validateMergeMode();
+        validateOutputMode();
 
         Set<String> profileSheetNames = validateProfiles();
         Set<String> lookupIds = validateLookups();
@@ -109,6 +113,23 @@ public class ConfigValidator {
             return "SHEETS_SEPARATE";
         }
         return mode;
+    }
+
+    /**
+     * v2.3.0: valida la clave {@code output.mode}. Estricto, case-sensitive,
+     * solo admite los valores literales {@code cierre}, {@code responsables},
+     * {@code completo}. Si la clave esta ausente o vacia, no es error
+     * (el default operativo es {@code cierre}, aplicado en {@link ExcelMerger}).
+     */
+    private void validateOutputMode() {
+        String raw = config.get("output.mode", "");
+        if (raw.isEmpty()) {
+            return;  // ausente o vacio -> default CIERRE, sin error
+        }
+        if (!VALID_OUTPUT_MODES.contains(raw)) {
+            errors.add("output.mode: valor invalido '" + raw + MSG_SUFFIX_ALLOWED_VALUES
+                    + VALID_OUTPUT_MODES + ".");
+        }
     }
 
     /**

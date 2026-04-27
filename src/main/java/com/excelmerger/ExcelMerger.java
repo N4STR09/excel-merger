@@ -89,12 +89,27 @@ public class ExcelMerger {
     /** Clave v2.2.0: maximo de ficheros Excel aceptados en el directorio de entrada. */
     private static final String KEY_STRICT_MAX_FILES = "input.strictMaxFiles";
 
+    /**
+     * v2.3.0: categoria de warning para mensajes relacionados con la
+     * configuracion. Extraida a constante porque las ocurrencias literales
+     * cruzaron el umbral de PMD AvoidDuplicateLiterals (maxDuplicateLiterals=4)
+     * al sumar el nuevo callsite del modo RESPONSABLES.
+     */
+    private static final String WARN_CATEGORY_CONFIG = "CONFIG";
+
     public void merge() {
         String inputDir = config.get("input.directory");
         String outputPath = config.get("output.file");
         MergeMode mode = MergeMode.valueOf(config.get("merge.mode", "SHEETS_SEPARATE"));
         boolean overwrite = config.getBoolean("output.overwrite", true);
         boolean backup = config.getBoolean("output.backup", false);
+
+        // v2.3.0: resolver el output mode. La validacion de sintaxis ya la
+        // hizo ConfigValidator; aqui solo parseamos y caemos a CIERRE de
+        // forma defensiva si el valor llega invalido (caso strictValidation=false).
+        OutputMode outputMode = resolveOutputMode();
+        report.setOutputMode(outputMode);
+        log.info("Output mode: {}", outputMode);
 
         // v2.2.0: resolver rango [minFiles, maxFiles] con retrocompat de
         // input.strictTwoFiles. Si se usa la clave legada, se emite warning
@@ -197,12 +212,16 @@ public class ExcelMerger {
 
             // 5b. Fusionar segun modo
             if (mode == MergeMode.SHEETS_SEPARATE) {
-                mergeSheetsSeparate(workbooks, excelFiles, result, profiles);
+                mergeSheetsSeparate(workbooks, excelFiles, result, profiles, outputMode);
             } else {
                 mergeAppendRows(workbooks.get(0), workbooks.get(1), result);
             }
 
-            // 5c. Hojas de lookup (tablas estaticas para VLOOKUP)
+            // 5c. Hojas de lookup (tablas estaticas para VLOOKUP).
+            //     Equipos esta marcada hidden=true en config.properties, asi
+            //     que aparece en el libro pero oculta. Se construye en los
+            //     3 modos porque es lookup necesario para la formula
+            //     "Equipo" de Resultado (decision Fase 0).
             new LookupSheetBuilder(config, report).buildAll(result);
 
             // 5d. Hoja MES (peticiones del perfil Cierre + columnas calculadas).
@@ -210,16 +229,26 @@ public class ExcelMerger {
             //     Cierre (antes Extraccion).
             new MesSheetBuilder(config, report).build(result);
 
-            // 5e. Hojas derivadas (formulas / agregaciones)
+            // 5e. Hojas derivadas (formulas / agregaciones). Ortogonal al
+            //     output mode: si derived.sheets esta vacio (default real)
+            //     este builder es no-op. Se invoca en los 3 modos.
             new DerivedSheetBuilder(config, report).buildAll(result);
 
-            // 5f. Hoja "Resumen" (v1.6.0): panel de cierre mensual con
-            //     SUMIFS sobre Resultado y la hoja del export de Jira.
-            //     Se construye tras MES para poder referenciar la hoja
-            //     Resultado por fórmula.
-            //     v2.0.0: la hoja con las imputaciones de Jira se llama
-            //     Extraccion (antes Cierre).
-            new SummarySheetBuilder(config, report).build(result);
+            // 5f. Hoja "Resumen" (v1.6.0): solo en CIERRE y COMPLETO.
+            //     v2.3.0: en RESPONSABLES no se genera Resumen (decision
+            //     Fase 0).
+            if (outputMode == OutputMode.CIERRE || outputMode == OutputMode.COMPLETO) {
+                new SummarySheetBuilder(config, report).build(result);
+            }
+
+            // 5f-bis. Hojas por responsable (v2.3.0): solo en RESPONSABLES
+            //     y COMPLETO. Se construye despues de Resumen para que en
+            //     COMPLETO el orden visible sea Cierre, Extraccion, Deuda,
+            //     Resultado, Resumen, [responsables alfa] (Equipos esta
+            //     entremedias pero oculta; ver Fase 0 P3 opcion (a)).
+            if (outputMode == OutputMode.RESPONSABLES || outputMode == OutputMode.COMPLETO) {
+                new ResponsablesSheetBuilder(config, report).buildAll(result);
+            }
 
             // 5g. Hoja de avisos (opt-in con report.inExcel=true). Se construye
             //     despues del resto de builders para recoger TODOS los warnings
@@ -341,7 +370,7 @@ public class ExcelMerger {
             int min = config.getInt(KEY_STRICT_MIN_FILES, 2);
             int max = config.getInt(KEY_STRICT_MAX_FILES, 3);
             if (hasLegacy) {
-                report.addWarning("CONFIG",
+                report.addWarning(WARN_CATEGORY_CONFIG,
                         KEY_STRICT_TWO_FILES + " es obsoleto y se ignora porque estan presentes "
                                 + KEY_STRICT_MIN_FILES + "/" + KEY_STRICT_MAX_FILES + ".");
             }
@@ -349,7 +378,7 @@ public class ExcelMerger {
         }
         if (hasLegacy) {
             boolean strictTwo = config.getBoolean(KEY_STRICT_TWO_FILES, true);
-            report.addWarning("CONFIG",
+            report.addWarning(WARN_CATEGORY_CONFIG,
                     KEY_STRICT_TWO_FILES + " es obsoleto; usa " + KEY_STRICT_MIN_FILES + "=2"
                             + " e " + KEY_STRICT_MAX_FILES + "=" + (strictTwo ? "2" : "3") + ".");
             // Ambos ramos mapean a [2,2]: si hay >2 ficheros, se trunca
@@ -360,6 +389,37 @@ public class ExcelMerger {
         }
         // Defaults v2.2.0
         return new int[]{2, 3};
+    }
+
+    /**
+     * v2.3.0: resuelve el {@link OutputMode} efectivo a partir de la clave
+     * {@code output.mode} de {@code config.properties}.
+     *
+     * <p>Reglas:</p>
+     * <ul>
+     *   <li>Ausente o vacia -> {@link OutputMode#CIERRE} (compatibilidad
+     *       v2.2.0).</li>
+     *   <li>Valor valido (case-sensitive) -> ese.</li>
+     *   <li>Valor invalido -> en condiciones normales con
+     *       {@code config.strictValidation=true} (default) ya hemos abortado
+     *       antes en {@link Main} desde {@link ConfigValidator}. Aqui el
+     *       camino solo se ejecuta cuando {@code strictValidation=false}: se
+     *       aceptan errores de config como warnings y caemos a CIERRE para
+     *       no fallar en runtime, simetrico con como trata {@code merge.mode}
+     *       el resto del codigo.</li>
+     * </ul>
+     */
+    private OutputMode resolveOutputMode() {
+        String raw = config.get("output.mode", "");
+        if (raw.isEmpty()) {
+            return OutputMode.CIERRE;
+        }
+        try {
+            return OutputMode.parseStrict(raw);
+        } catch (IllegalArgumentException e) {
+            log.warn("Valor invalido para output.mode='{}'; se usa CIERRE por defecto.", raw);
+            return OutputMode.CIERRE;
+        }
     }
 
     // ==================================================================
@@ -379,10 +439,27 @@ public class ExcelMerger {
      * orden alfabetico de los ficheros.</p>
      */
     private void mergeSheetsSeparate(List<Workbook> workbooks, List<File> files, Workbook result,
-                                     List<FileProfileResolver.FileProfile> profiles) {
+                                     List<FileProfileResolver.FileProfile> profiles,
+                                     OutputMode outputMode) {
         int[] order = computeProfileOrder(profiles);
         for (int i : order) {
-            copyAllSheetsFrom(workbooks.get(i), result, profiles.get(i),
+            FileProfileResolver.FileProfile profile = profiles.get(i);
+            // v2.3.0: en modo RESPONSABLES no se copia la hoja Deuda (decision
+            // Fase 0). El input deuda.xlsx puede estar presente pero su hoja
+            // no se copia al libro de salida; las formulas "PDCL + Deuda" en
+            // Resultado se degradan automaticamente al modo "sin Deuda" igual
+            // que cuando el usuario no aporta el 3er fichero.
+            if (outputMode == OutputMode.RESPONSABLES
+                    && profile != null
+                    && "Deuda".equals(profile.getId())) {
+                log.info("[Merger] Modo RESPONSABLES: se omite la copia del fichero "
+                        + "perfil 'Deuda' ({}).", files.get(i).getName());
+                report.addWarning(WARN_CATEGORY_CONFIG,
+                        "Modo RESPONSABLES: se omite la hoja del fichero "
+                                + files.get(i).getName() + " (perfil Deuda).");
+                continue;
+            }
+            copyAllSheetsFrom(workbooks.get(i), result, profile,
                     "archivo " + (i + 1) + " (" + files.get(i).getName() + ")");
         }
     }
@@ -512,7 +589,7 @@ public class ExcelMerger {
         List<String> asTextDeclared = profile.getAsTextColumns();
         for (String col : declared) {
             if (!containsIgnoreCase(asTextDeclared, col)) {
-                report.addWarning("CONFIG",
+                report.addWarning(WARN_CATEGORY_CONFIG,
                         "Columna '" + col + "' declarada en 'profile."
                                 + profile.getId() + ".trim.columns' pero no en "
                                 + "'asText.columns'; el trim solo aplica a valores "
@@ -560,19 +637,7 @@ public class ExcelMerger {
     }
 
     private String ensureUniqueSheetName(Workbook wb, String base) {
-        if (wb.getSheet(base) == null) return base;
-        String root = base;
-        int suffix = 2;
-        while (true) {
-            String candidate = root + "_" + suffix;
-            if (candidate.length() > FileProfileResolver.MAX_SHEET_NAME_LEN) {
-                int excess = candidate.length() - FileProfileResolver.MAX_SHEET_NAME_LEN;
-                root = root.substring(0, root.length() - excess);
-                candidate = root + "_" + suffix;
-            }
-            if (wb.getSheet(candidate) == null) return candidate;
-            suffix++;
-        }
+        return FileProfileResolver.ensureUniqueSheetName(wb, base);
     }
 
     /**

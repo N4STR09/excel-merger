@@ -39,6 +39,9 @@ public class RunReport {
      */
     private final Map<String, Set<String>> lookupKeys = new LinkedHashMap<>();
 
+    /** v2.3.0: modo de salida usado en esta ejecucion (cierre / responsables / completo). */
+    private OutputMode outputMode;
+
     /** Registra una hoja generada en el libro resultado, con su numero de filas. */
     public void addSheet(String name, int rows) {
         sheets.put(name, rows);
@@ -62,6 +65,19 @@ public class RunReport {
 
     public boolean hasLookup(String sheetName) {
         return lookupKeys.containsKey(sheetName);
+    }
+
+    /**
+     * v2.3.0: registra el {@link OutputMode} efectivo usado en la ejecucion.
+     * Se vuelca en {@link #formatSummary(Duration)} para trazabilidad.
+     */
+    public void setOutputMode(OutputMode mode) {
+        this.outputMode = mode;
+    }
+
+    /** v2.3.0: devuelve el {@link OutputMode} efectivo, o {@code null} si no se ha fijado. */
+    public OutputMode getOutputMode() {
+        return outputMode;
     }
 
     public Map<String, Integer> sheets() {
@@ -88,6 +104,10 @@ public class RunReport {
         sb.append("   RESUMEN DE EJECUCION").append(nl);
         sb.append("====================================").append(nl);
         sb.append("Tiempo total: ").append(elapsed.toMillis()).append(" ms").append(nl);
+
+        if (outputMode != null) {
+            sb.append("Modo: ").append(outputMode).append(nl);
+        }
 
         sb.append("Hojas generadas (").append(sheets.size()).append("):").append(nl);
         if (sheets.isEmpty()) {

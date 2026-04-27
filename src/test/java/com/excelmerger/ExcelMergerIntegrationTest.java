@@ -1741,4 +1741,238 @@ class ExcelMergerIntegrationTest {
         }
         return -1;
     }
+
+    // ==================================================================
+    //  v2.3.0 — Output mode (cierre / responsables / completo)
+    // ==================================================================
+
+    /**
+     * El default ausente equivale a {@code cierre}: estructura identica al
+     * happy path historico (ver {@link #mergeCompletoProduceTodasLasHojasEsperadas}).
+     */
+    @Test
+    void outputModeCierreEsElDefaultYProduceLaMismaEstructuraQueV220(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "cierre");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            assertThat(wb.getNumberOfSheets()).isEqualTo(5);
+            assertThat(wb.getSheet("Cierre")).isNotNull();
+            assertThat(wb.getSheet("Extraccion")).isNotNull();
+            assertThat(wb.getSheet("Equipos")).isNotNull();
+            assertThat(wb.getSheet("Resultado")).isNotNull();
+            assertThat(wb.getSheet("Resumen")).isNotNull();
+        }
+    }
+
+    /**
+     * En modo {@code responsables}, el output tiene Cierre, Extraccion,
+     * Equipos (oculta), Resultado, y N hojas vacias por responsable
+     * distinto de {@code Resultado.Res. Tecnico}. NO tiene Deuda ni Resumen.
+     *
+     * <p>Los fixtures generan estos responsables en Resultado: tresp1@x,
+     * tresp2@x, tresp3@x, MG002 (sin padding tras trim de profile.Cierre),
+     * y "TRESP1@x" en MAYUS que colapsa con tresp1@x via case-folding.
+     * Total: 4 responsables distintos.</p>
+     */
+    @Test
+    void outputModeResponsablesGeneraHojasPorResponsableYOmiteResumen(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "responsables");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            // Hojas que SI deben existir.
+            assertThat(wb.getSheet("Cierre")).as("Cierre presente").isNotNull();
+            assertThat(wb.getSheet("Extraccion")).as("Extraccion presente").isNotNull();
+            assertThat(wb.getSheet("Equipos")).as("Equipos (lookup) presente").isNotNull();
+            assertThat(wb.getSheet("Resultado")).as("Resultado presente").isNotNull();
+
+            // Hojas que NO deben existir en modo responsables.
+            assertThat(wb.getSheet("Resumen")).as("Resumen NO debe generarse").isNull();
+            // Sin fichero Deuda en input por defecto (solo 2 ficheros), tampoco
+            // habria Deuda en cierre. Aqui validamos solo la ausencia de Resumen.
+
+            // Hojas por responsable: al menos las 4 esperadas.
+            assertThat(wb.getSheet("tresp1@x")).as("hoja tresp1@x").isNotNull();
+            assertThat(wb.getSheet("tresp2@x")).as("hoja tresp2@x").isNotNull();
+            assertThat(wb.getSheet("tresp3@x")).as("hoja tresp3@x").isNotNull();
+            assertThat(wb.getSheet("MG002")).as("hoja MG002 (tras trim)").isNotNull();
+
+            // Cabecera A1 con el nombre canonico.
+            Sheet juan = wb.getSheet("tresp1@x");
+            assertThat(juan.getRow(0).getCell(0).getStringCellValue()).isEqualTo("tresp1@x");
+        }
+    }
+
+    /**
+     * En modo {@code responsables}, las hojas por responsable deben
+     * posicionarse DESPUES de Resultado en el orden del libro. Equipos
+     * (oculta) puede quedar entremedias por motivos de implementacion
+     * (decision Fase 0 P2 opcion (a)).
+     */
+    @Test
+    void outputModeResponsablesPosicionaHojasResponsableTrasResultado(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "responsables");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            int idxResultado = wb.getSheetIndex("Resultado");
+            int idxTresp1 = wb.getSheetIndex("tresp1@x");
+            int idxTresp2 = wb.getSheetIndex("tresp2@x");
+            int idxTresp3 = wb.getSheetIndex("tresp3@x");
+            int idxMG002 = wb.getSheetIndex("MG002");
+
+            assertThat(idxTresp1).as("tresp1@x tras Resultado").isGreaterThan(idxResultado);
+            assertThat(idxTresp2).as("tresp2@x tras Resultado").isGreaterThan(idxResultado);
+            assertThat(idxTresp3).as("tresp3@x tras Resultado").isGreaterThan(idxResultado);
+            assertThat(idxMG002).as("MG002 tras Resultado").isGreaterThan(idxResultado);
+        }
+    }
+
+    /**
+     * En modo {@code responsables} con fichero Deuda en el input, la hoja
+     * Deuda NO se copia al libro de salida. La formula PDCL+Deuda en
+     * Resultado se degrada al modo "sin Deuda" (igual que cuando el usuario
+     * no aporta el 3er fichero), comportamiento heredado de v2.2.0.
+     */
+    @Test
+    void outputModeResponsablesOmiteCopiaDeDeudaIncluso3FicherosEnInput(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithDeudaAndOutputMode(tmp, "responsables");
+        RunReport report = new RunReport();
+        new ExcelMerger(cfg, report).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            assertThat(wb.getSheet("Deuda")).as("Deuda NO debe estar en el output").isNull();
+            assertThat(wb.getSheet("Resumen")).as("Resumen NO debe estar en el output").isNull();
+            assertThat(wb.getSheet("Resultado")).isNotNull();
+
+            // La formula PDCL+Deuda no debe contener referencia a Deuda.
+            Sheet resultado = wb.getSheet("Resultado");
+            int rowP001 = findRowByFirstCell(resultado, "P-001");
+            // Indice 9 = PDCL + Deuda en test-config.
+            String formula = resultado.getRow(rowP001).getCell(9).getCellFormula();
+            assertThat(formula).doesNotContain("Deuda!");
+
+            // Y un warning CONFIG sobre la omision.
+            assertThat(report.warnings())
+                    .anyMatch(w -> "CONFIG".equals(w.category)
+                            && w.message.contains("RESPONSABLES")
+                            && w.message.contains("Deuda"));
+        }
+    }
+
+    /**
+     * En modo {@code completo}, el output contiene todas las hojas del modo
+     * cierre (incluida Deuda y Resumen) MAS las hojas por responsable.
+     */
+    @Test
+    void outputModeCompletoIncluyeTodasLasHojasDeCierreYDeResponsables(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithDeudaAndOutputMode(tmp, "completo");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            // Todas las hojas del modo cierre (con Deuda).
+            assertThat(wb.getSheet("Cierre")).isNotNull();
+            assertThat(wb.getSheet("Extraccion")).isNotNull();
+            assertThat(wb.getSheet("Deuda")).as("Deuda SI debe estar en completo").isNotNull();
+            assertThat(wb.getSheet("Equipos")).isNotNull();
+            assertThat(wb.getSheet("Resultado")).isNotNull();
+            assertThat(wb.getSheet("Resumen")).as("Resumen SI debe estar en completo").isNotNull();
+
+            // Hojas por responsable.
+            assertThat(wb.getSheet("tresp1@x")).isNotNull();
+            assertThat(wb.getSheet("tresp2@x")).isNotNull();
+            assertThat(wb.getSheet("tresp3@x")).isNotNull();
+            assertThat(wb.getSheet("MG002")).isNotNull();
+        }
+    }
+
+    /**
+     * En modo {@code completo}, las hojas por responsable se colocan despues
+     * de Resumen.
+     */
+    @Test
+    void outputModeCompletoPosicionaResponsablesTrasResumen(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithDeudaAndOutputMode(tmp, "completo");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            int idxResumen = wb.getSheetIndex("Resumen");
+            assertThat(wb.getSheetIndex("tresp1@x")).isGreaterThan(idxResumen);
+            assertThat(wb.getSheetIndex("tresp2@x")).isGreaterThan(idxResumen);
+            assertThat(wb.getSheetIndex("tresp3@x")).isGreaterThan(idxResumen);
+            assertThat(wb.getSheetIndex("MG002")).isGreaterThan(idxResumen);
+        }
+    }
+
+    /**
+     * El RunReport registra el modo efectivo usado.
+     */
+    @Test
+    void outputModeQuedaRegistradoEnRunReport(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "responsables");
+        RunReport report = new RunReport();
+        new ExcelMerger(cfg, report).merge();
+
+        assertThat(report.getOutputMode()).isEqualTo(OutputMode.RESPONSABLES);
+        assertThat(report.formatSummary(java.time.Duration.ofMillis(1)))
+                .contains("Modo: RESPONSABLES");
+    }
+
+    /**
+     * Modo invalido en config con strictValidation=true (default) aborta
+     * el run via ConfigValidator antes de llegar a ExcelMerger. El test
+     * unitario de ConfigValidator cubre el contenido del mensaje de error;
+     * aqui solo verificamos que efectivamente ConfigValidator detecta el
+     * error.
+     */
+    @Test
+    void outputModeInvalidoProduceErrorEnConfigValidator(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "TODO_VAL");
+
+        java.util.List<String> errors = new ConfigValidator(cfg).validate();
+        assertThat(errors)
+                .anyMatch(e -> e.contains("output.mode")
+                        && e.contains("TODO_VAL"));
+    }
+
+    /**
+     * Con valor invalido y strictValidation=false, ExcelMerger cae a CIERRE
+     * de forma defensiva (en lugar de lanzar excepcion en runtime).
+     */
+    @Test
+    void outputModeInvalidoConStrictValidationFalseCaeACierre(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "TODO_VAL");
+        // Simulamos lo que hace Main cuando strictValidation=false: ignora
+        // los errores del validador y deja correr al merger. ExcelMerger
+        // debe caer a CIERRE.
+        RunReport report = new RunReport();
+        new ExcelMerger(cfg, report).merge();
+
+        // Estructura de modo cierre (5 hojas).
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            assertThat(wb.getNumberOfSheets()).isEqualTo(5);
+            assertThat(wb.getSheet("Resumen")).isNotNull();
+        }
+        assertThat(report.getOutputMode()).isEqualTo(OutputMode.CIERRE);
+    }
 }

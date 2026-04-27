@@ -92,6 +92,13 @@ class MainTest {
         // 2.2.0: fichero opcional de Deuda. Nuevo tipo de columna
         //        FORMULA_PLUS_SUMIFS; retrocompat de input.strictTwoFiles
         //        via input.strictMinFiles/MaxFiles. Ver CHANGELOG [2.2.0].
-        assertThat(Main.APP_VERSION).isEqualTo("2.2.0");
+        // 2.3.0: modos de generacion (output.mode=cierre|responsables|completo).
+        //        Default cierre preserva 100% el comportamiento de v2.2.0.
+        //        Nuevo enum OutputMode + ResponsablesSheetBuilder (N hojas
+        //        vacias por responsable distinto en Resultado.Res. Tecnico,
+        //        trim + case-insensitive, orden Collator es_ES). Switch de
+        //        modos en ExcelMerger.merge: en RESPONSABLES omite Resumen
+        //        y la copia del input Deuda. Ver CHANGELOG [2.3.0].
+        assertThat(Main.APP_VERSION).isEqualTo("2.3.0");
     }
 }

@@ -90,6 +90,54 @@ public final class TestFixtures {
     }
 
     /**
+     * v2.3.0: variante de {@link #buildRealisticConfig(Path)} que ademas
+     * sobreescribe la clave {@code output.mode} con el valor indicado, sin
+     * tocar el resto del rendering. Util para tests del modo de salida.
+     *
+     * <p>Implementacion: renderiza el test-config como hace el atajo normal,
+     * lee el resultado, sustituye o anade {@code output.mode=<modo>}, y
+     * vuelve a escribir el fichero antes de cargarlo. Asi cubrimos los dos
+     * casos: clave existente (la sustituye) y clave ausente (la anade al
+     * final).</p>
+     */
+    public static ConfigLoader buildRealisticConfigWithOutputMode(Path baseDir, String mode) throws IOException {
+        Path inputDir = baseDir.resolve("input");
+        Path outputFile = baseDir.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        copyFixturesTo(inputDir);
+        Path cfg = renderTestConfig(baseDir.resolve("test-config.properties"), inputDir, outputFile);
+        overrideOutputMode(cfg, mode);
+        return new ConfigLoader(cfg.toString());
+    }
+
+    /**
+     * v2.3.0: variante con fixtures de Deuda incluidos para tests del modo
+     * COMPLETO (que usa Deuda) y RESPONSABLES (que la ignora explicitamente).
+     */
+    public static ConfigLoader buildRealisticConfigWithDeudaAndOutputMode(Path baseDir, String mode) throws IOException {
+        Path inputDir = baseDir.resolve("input");
+        Path outputFile = baseDir.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        copyFixturesWithDeudaTo(inputDir);
+        Path cfg = renderTestConfig(baseDir.resolve("test-config.properties"), inputDir, outputFile);
+        overrideOutputMode(cfg, mode);
+        return new ConfigLoader(cfg.toString());
+    }
+
+    private static void overrideOutputMode(Path cfg, String mode) throws IOException {
+        String content = Files.readString(cfg, StandardCharsets.UTF_8);
+        java.util.regex.Pattern p =
+                java.util.regex.Pattern.compile("^output\\.mode=.*$", java.util.regex.Pattern.MULTILINE);
+        String replacement = "output.mode=" + mode;
+        if (p.matcher(content).find()) {
+            content = p.matcher(content).replaceAll(java.util.regex.Matcher.quoteReplacement(replacement));
+        } else {
+            content = content + System.lineSeparator() + replacement + System.lineSeparator();
+        }
+        Files.writeString(cfg, content, StandardCharsets.UTF_8);
+    }
+
+    /**
      * Construye un {@link ConfigLoader} a partir de un {@link Properties}.
      * Util para tests unitarios: el Properties se serializa a un fichero
      * temporal y se carga via el constructor publico de ConfigLoader.

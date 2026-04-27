@@ -198,6 +198,65 @@ La clave legada `input.strictTwoFiles` sigue funcionando para compatibilidad (v2
 
 Si `output.backup=true` y el archivo de salida ya existe, antes de sobreescribirlo se mueve a `<carpeta del output>/history/<nombre>_yyyy-MM-dd_HHmmss.xlsx` (la carpeta `history` se crea si no existe).
 
+### Modos de generación (`output.mode`, v2.3.0)
+
+La clave `output.mode` controla **qué hojas se generan** en el libro de salida. Acepta tres valores (estricto, case-sensitive, en minúsculas):
+
+| Modo | Hojas generadas |
+| --- | --- |
+| `cierre` (**default**) | `Cierre`, `Extraccion`, `Deuda` (si hay 3er fichero), `Equipos` (oculta), `Resultado`, `Resumen`. Es el comportamiento histórico de v2.2.0. |
+| `responsables` | `Cierre`, `Extraccion`, `Equipos` (oculta), `Resultado`, y **N hojas vacías** (una por cada responsable distinto que aparezca en `Resultado.Res. Tecnico`). **NO** genera `Deuda` (la copia del input se omite) ni `Resumen`. |
+| `completo` | Suma de los dos: todas las hojas de `cierre` + las hojas por responsable. |
+
+```properties
+# Default si la clave esta ausente o vacia: cierre.
+output.mode=cierre
+```
+
+#### Detección de responsables (modos `responsables` y `completo`)
+
+- **Trim + case-insensitive**: valores como `tresp1@x`, `TRESP1@x` y `  tresp1@x  ` colapsan en una **única** hoja, igual que cómo `summary.byResponsible` ya normaliza responsables en v1.8.0+.
+- **Nombre canónico**: el primer literal visto en orden de filas de `Resultado`. Si en `Resultado.Res. Tecnico` aparece primero `tresp1@x` (P-001) y después `TRESP1@x` (P-015), la hoja se llama `tresp1@x` y la celda `A1` muestra `tresp1@x`.
+- **Sin filtros ni exclusiones**: cualquier valor no-vacío genera hoja. Valores vacíos o sólo espacios se ignoran.
+- **Orden alfabético** con `Collator es_ES PRIMARY`: tildes y mayúsculas se tratan como un humano espera; salida determinista entre ejecuciones.
+
+#### Saneo de nombres de hoja
+
+Excel limita los nombres de hoja a 31 caracteres y prohíbe `\ / ? * [ ] :`. Si un responsable se llama `Juan Carlos / Pérez-García`:
+
+1. Caracteres prohibidos → `_`. Truncado a 31 chars.
+2. Si el saneo modifica el nombre → warning categoría `RESPONSABLE` en el resumen final y en la hoja `_Avisos` (si está habilitada).
+3. Si tras sanear hay colisión con otra hoja → sufijo `_2`, `_3`, ... + warning `RESPONSABLE`.
+
+La celda `A1` siempre muestra el **nombre canónico original** (sin sanear), aplicando el estilo `title` (negrita, 14 pt). El nombre de la pestaña es el saneado.
+
+#### Cabecera de cada hoja por responsable
+
+Por ahora **solo `A1`** con el nombre del responsable. En sesiones futuras se añadirán dos tablas de resumen (la decisión está documentada en CHANGELOG; el resto de la hoja queda vacío hasta entonces).
+
+#### Ejemplos de uso
+
+```bash
+# Cierre completo del mes (comportamiento histórico):
+java -jar excel-merger.jar config.properties
+
+# Solo Resultado + plantillas vacías por responsable para repartir:
+# (en el config: output.mode=responsables)
+java -jar excel-merger.jar config-responsables.properties
+
+# Todo en un único libro: cierre + plantillas por responsable:
+# (en el config: output.mode=completo)
+java -jar excel-merger.jar config-completo.properties
+```
+
+#### Comportamiento de `Deuda` en modo `responsables`
+
+Si el usuario aporta `deuda.xlsx` en el directorio de entrada y configura `output.mode=responsables`, el fichero se detecta normalmente pero **su hoja no se copia al libro de salida** (el motor lo omite con un warning `CONFIG`). Las fórmulas `PDCL + Deuda` en `Resultado` se degradan automáticamente al modo "sin Deuda", igual que en v2.2.0 cuando el usuario no aporta el 3er fichero.
+
+#### Validación
+
+Si `output.mode` tiene un valor no permitido (`Cierre` con mayúscula, `foo`, ...), `ConfigValidator` lo reporta como error listando los 3 válidos. Con `config.strictValidation=true` (default) el run aborta con exit code 2; con `strictValidation=false` el motor cae a `cierre` defensivamente.
+
 ### Perfiles (detección por contenido)
 
 Cada perfil define las cabeceras que deben encontrarse para considerar que un Excel es de ese tipo.

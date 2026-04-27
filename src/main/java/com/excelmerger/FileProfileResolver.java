@@ -93,6 +93,32 @@ public class FileProfileResolver {
         return cleaned;
     }
 
+    /**
+     * v2.3.0: dado un nombre base ya saneado (longitud &le; {@link #MAX_SHEET_NAME_LEN}
+     * y sin caracteres prohibidos), devuelve un nombre unico dentro del workbook.
+     * Si el base no colisiona, se devuelve tal cual; si colisiona, se sufija
+     * {@code _2}, {@code _3}, ..., truncando el prefijo cuando haga falta para
+     * no exceder los 31 caracteres.
+     *
+     * <p>Movido desde {@code ExcelMerger} en v2.3.0 para reutilizarse desde
+     * {@link ResponsablesSheetBuilder}. Comportamiento identico al original.</p>
+     */
+    public static String ensureUniqueSheetName(Workbook wb, String base) {
+        if (wb.getSheet(base) == null) return base;
+        String root = base;
+        int suffix = 2;
+        while (true) {
+            String candidate = root + "_" + suffix;
+            if (candidate.length() > MAX_SHEET_NAME_LEN) {
+                int excess = candidate.length() - MAX_SHEET_NAME_LEN;
+                root = root.substring(0, root.length() - excess);
+                candidate = root + "_" + suffix;
+            }
+            if (wb.getSheet(candidate) == null) return candidate;
+            suffix++;
+        }
+    }
+
     // ================================================================
     //  FileProfile: un perfil y su logica de deteccion
     // ================================================================

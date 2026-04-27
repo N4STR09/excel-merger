@@ -38,6 +38,7 @@
             <Class name="com.excelmerger.ExcelMerger"/>
             <Class name="com.excelmerger.LookupSheetBuilder"/>
             <Class name="com.excelmerger.MesSheetBuilder"/>
+            <Class name="com.excelmerger.ResponsablesSheetBuilder"/>
             <Class name="com.excelmerger.SummarySheetBuilder"/>
         </Or>
         <Bug pattern="EI_EXPOSE_REP2"/>
