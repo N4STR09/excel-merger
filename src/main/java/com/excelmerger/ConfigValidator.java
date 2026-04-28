@@ -88,6 +88,7 @@ public class ConfigValidator {
         validateDerived(knownSheets);
         validateSummary(knownSheets);
         validateOrphans(knownSheets);
+        validateResponsablesTables();
 
         return Collections.unmodifiableList(new ArrayList<>(errors));
     }
@@ -550,6 +551,54 @@ public class ConfigValidator {
                 errors.add("summary.byResponsible.gapRows: valor no numerico '"
                         + gapRaw + "'.");
             }
+        }
+    }
+
+    /**
+     * v2.4.0 — Valida las claves {@code responsables.tables.*}.
+     *
+     * <p>Las tablas pivot por responsable son opt-out: si la clave
+     * {@code responsables.tables.enabled} no está, se asume {@code true}.
+     * No tienen precondiciones cruzadas (las hojas de responsable se
+     * generan según {@link OutputMode} y la existencia de Resultado se
+     * valida en runtime).</p>
+     *
+     * <p>Validaciones:</p>
+     * <ul>
+     *   <li>{@code responsables.tables.gapRows}: si presente, entero >= 0.</li>
+     *   <li>{@code responsables.tables.jiraTitle} y {@code .realTitle}: si
+     *       están presentes, no pueden ser blancos.</li>
+     * </ul>
+     *
+     * <p>No se valida que las columnas Petición/Matrícula/Res. Tecnico/Jira/REAL
+     * existan en Resultado: ese chequeo es runtime y emite warning si faltan
+     * (mismo patrón que el resto de los builders).</p>
+     */
+    private void validateResponsablesTables() {
+        // gapRows admite 0; validar como entero >= 0 si está presente.
+        String gapRaw = config.get("responsables.tables.gapRows", null);
+        if (gapRaw != null && !gapRaw.trim().isEmpty()) {
+            try {
+                int gap = Integer.parseInt(gapRaw.trim());
+                if (gap < 0) {
+                    errors.add("responsables.tables.gapRows debe ser >= 0 (actual: "
+                            + gap + ").");
+                }
+            } catch (NumberFormatException e) {
+                errors.add("responsables.tables.gapRows: valor no numerico '"
+                        + gapRaw + "'.");
+            }
+        }
+
+        // Títulos: si están explícitos, no pueden ser solo espacios.
+        // Si no están, se usan los defaults del builder, así que no validamos.
+        String jiraTitle = config.get("responsables.tables.jiraTitle", null);
+        if (jiraTitle != null && isBlank(jiraTitle)) {
+            errors.add("responsables.tables.jiraTitle: no puede estar vacio.");
+        }
+        String realTitle = config.get("responsables.tables.realTitle", null);
+        if (realTitle != null && isBlank(realTitle)) {
+            errors.add("responsables.tables.realTitle: no puede estar vacio.");
         }
     }
 

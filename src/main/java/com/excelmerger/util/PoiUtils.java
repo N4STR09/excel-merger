@@ -7,6 +7,10 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.util.CellReference;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
 /**
  * Utilidades comunes sobre el modelo de Apache POI.
  *
@@ -279,5 +283,51 @@ public final class PoiUtils {
             }
         }
         return max;
+    }
+
+    /**
+     * Ordena una coleccion de cadenas con la misma politica que el resto de
+     * la app: primero las puramente numericas (digit-only) en orden numerico
+     * ascendente, despues las no numericas en orden lexicografico ascendente.
+     *
+     * <p>Util para producir orden determinista de matriculas y peticiones
+     * cuando el dominio mezcla codigos como {@code "55751"} con etiquetas
+     * tipo {@code "P-001"} o {@code "M-1001"}. La separacion en dos buckets
+     * evita que {@code "P-001"} aparezca antes que {@code "55751"} (que es
+     * lo que daria un sort lexicografico puro).</p>
+     *
+     * <p>Devuelve una lista nueva (no modifica la coleccion de entrada).
+     * Las entradas {@code null} se ignoran.</p>
+     *
+     * <p>v2.4.0: extraido de {@code SummarySheetBuilder.discoverMatriculas}
+     * para reutilizar en {@code ResponsablePivotBuilder}.</p>
+     */
+    public static List<String> mixedNumericLexicographicSort(Collection<String> values) {
+        List<String> numeric = new ArrayList<>();
+        List<String> others = new ArrayList<>();
+        for (String s : values) {
+            if (s == null) continue;
+            if (isAllDigits(s)) {
+                numeric.add(s);
+            } else {
+                others.add(s);
+            }
+        }
+        numeric.sort((a, b) -> Long.compare(Long.parseLong(a), Long.parseLong(b)));
+        others.sort(String::compareTo);
+
+        List<String> out = new ArrayList<>(numeric.size() + others.size());
+        out.addAll(numeric);
+        out.addAll(others);
+        return out;
+    }
+
+    private static boolean isAllDigits(String s) {
+        if (s == null || s.isEmpty()) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (ch < '0' || ch > '9') return false;
+        }
+        return true;
     }
 }

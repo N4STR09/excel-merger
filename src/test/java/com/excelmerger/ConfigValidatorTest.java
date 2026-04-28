@@ -654,4 +654,60 @@ class ConfigValidatorTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> errors.add("boom"))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    // ==================================================================
+    //  v2.4.0 — Tablas pivot por responsable
+    // ==================================================================
+
+    @Test
+    void responsablesTablesGapRowsValidoNoDevuelveErrores() {
+        Properties p = minimalValid();
+        p.setProperty("responsables.tables.gapRows", "0");
+        assertThat(validatorFor(p).validate())
+                .noneMatch(s -> s.contains("responsables.tables.gapRows"));
+    }
+
+    @Test
+    void responsablesTablesGapRowsNegativoDevuelveError() {
+        Properties p = minimalValid();
+        p.setProperty("responsables.tables.gapRows", "-1");
+        assertThat(validatorFor(p).validate())
+                .anyMatch(s -> s.contains("responsables.tables.gapRows")
+                        && s.contains(">= 0"));
+    }
+
+    @Test
+    void responsablesTablesGapRowsNoNumericoDevuelveError() {
+        Properties p = minimalValid();
+        p.setProperty("responsables.tables.gapRows", "doce");
+        assertThat(validatorFor(p).validate())
+                .anyMatch(s -> s.contains("responsables.tables.gapRows")
+                        && s.contains("no numerico"));
+    }
+
+    @Test
+    void responsablesTablesJiraTitleVacioDevuelveError() {
+        Properties p = minimalValid();
+        p.setProperty("responsables.tables.jiraTitle", "   ");
+        assertThat(validatorFor(p).validate())
+                .anyMatch(s -> s.contains("responsables.tables.jiraTitle")
+                        && s.contains("no puede estar vacio"));
+    }
+
+    @Test
+    void responsablesTablesRealTitleVacioDevuelveError() {
+        Properties p = minimalValid();
+        p.setProperty("responsables.tables.realTitle", "");
+        assertThat(validatorFor(p).validate())
+                .anyMatch(s -> s.contains("responsables.tables.realTitle")
+                        && s.contains("no puede estar vacio"));
+    }
+
+    @Test
+    void responsablesTablesAusenteNoEsError() {
+        // Sin ninguna clave responsables.tables.*: validador no debe protestar.
+        Properties p = minimalValid();
+        assertThat(validatorFor(p).validate())
+                .noneMatch(s -> s.contains("responsables.tables"));
+    }
 }
