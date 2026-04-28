@@ -104,6 +104,14 @@ class MainTest {
         //        SUMIFS (Jira y REAL) filtradas por A1, opt-out via
         //        responsables.tables.enabled=false. Nuevo helper
         //        ResponsablePivotBuilder. Ver CHANGELOG [2.4.0].
-        assertThat(Main.APP_VERSION).isEqualTo("2.4.0");
+        // 2.5.0: refactor estructural de ConfigValidator (Sesion F.1).
+        //        Cambio interno sin efecto en la salida, en la CLI ni en
+        //        el config.properties. ConfigValidator monolitico (715
+        //        LoC) -> orquestador delgado + 7 *ConfigSection en
+        //        com.excelmerger.config. FQN cambia de
+        //        com.excelmerger.ConfigValidator a
+        //        com.excelmerger.config.ConfigValidator; firma intacta.
+        //        Ver CHANGELOG [2.5.0].
+        assertThat(Main.APP_VERSION).isEqualTo("2.5.0");
     }
 }

@@ -1,5 +1,6 @@
 package com.excelmerger;
 
+import com.excelmerger.config.ConfigValidator;
 import com.excelmerger.exception.InputValidationException;
 import com.excelmerger.exception.OutputException;
 

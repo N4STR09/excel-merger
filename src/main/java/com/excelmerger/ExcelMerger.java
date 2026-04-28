@@ -402,7 +402,7 @@ public class ExcelMerger {
      *   <li>Valor valido (case-sensitive) -> ese.</li>
      *   <li>Valor invalido -> en condiciones normales con
      *       {@code config.strictValidation=true} (default) ya hemos abortado
-     *       antes en {@link Main} desde {@link ConfigValidator}. Aqui el
+     *       antes en {@link Main} desde {@link com.excelmerger.config.ConfigValidator}. Aqui el
      *       camino solo se ejecuta cuando {@code strictValidation=false}: se
      *       aceptan errores de config como warnings y caemos a CIERRE para
      *       no fallar en runtime, simetrico con como trata {@code merge.mode}

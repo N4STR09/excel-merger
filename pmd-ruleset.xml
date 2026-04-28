@@ -99,15 +99,27 @@
 
     <!-- === DESIGN (equivalente a java-design) ==================== -->
     <rule ref="category/java/design.xml">
-        <!-- DECISIÓN ARQUITECTÓNICA (v2.0.1): los orquestadores
-             MesSheetBuilder (772 LoC), SummarySheetBuilder (664 LoC) y
-             ConfigValidator (607 LoC) son legítimamente complejos porque
-             cada uno encapsula una transformación Excel completa con
-             múltiples casos de negocio. Partirlos en colaboradores
-             pequeños fragmentaría la lógica de dominio sin ganancia real
-             de mantenibilidad: cada sub-pieza solo tendría sentido en el
-             contexto del orquestador. Un refactor de este tipo sería el
-             objetivo de una futura Sesión F, no de esta limpieza PMD.
+        <!-- DECISIÓN ARQUITECTÓNICA (v2.0.1, revisada en v2.5.0): los
+             orquestadores MesSheetBuilder (772 LoC) y SummarySheetBuilder
+             (664 LoC) son legítimamente complejos porque cada uno encapsula
+             una transformación Excel completa con múltiples casos de
+             negocio. Partirlos en colaboradores pequeños fragmentaría la
+             lógica de dominio sin ganancia real de mantenibilidad: cada
+             sub-pieza solo tendría sentido en el contexto del orquestador.
+
+             v2.5.0 (Sesión F, parte 1): ConfigValidator SÍ se partió en
+             un orquestador delgado (~80 LoC) más siete *ConfigSection
+             colaboradoras en el subpaquete com.excelmerger.config. El
+             refactor fue posible porque las validaciones del config
+             tienen baja cohesión (cada bloque de validación es
+             independiente y solo comparte la lista 'errors' acumulada),
+             cosa que NO ocurre en MesSheetBuilder ni SummarySheetBuilder.
+             Las exclusiones siguen escritas a nivel de ruleset (no por
+             fichero) porque PMD no soporta de forma estándar excludes
+             por path en este proyecto, y porque las dos clases que
+             quedan justifican la exclusión global. Una futura Sesión F2
+             que aborde MesSheetBuilder o SummarySheetBuilder podrá
+             reevaluarlas.
 
              En v2.0.1 se revisó caso por caso:
              - Las exclusiones que sí cubrían código real pero eran

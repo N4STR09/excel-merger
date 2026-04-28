@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.5.0] — Refactor estructural de `ConfigValidator` (Sesión F, parte 1)
+
+Release minor sin cambios funcionales. **El contrato externo es idéntico al de v2.4.0**: misma CLI, mismo `config.properties`, mismo output, mismos códigos de salida. Si tu deployment usa v2.4.0, este binario lo sustituye sin requerir cambios.
+
+El cambio es 100% interno: el antiguo `com.excelmerger.ConfigValidator` (715 LoC, un único método `validate()` con dieciséis sub-métodos privados) se ha partido en un orquestador delgado de ~80 LoC más siete colaboradores `*ConfigSection` (`Io`, `Profiles`, `Mes`, `Derived`, `Summary`, `Orphans`, `ResponsablesTables`) en el subpaquete nuevo `com.excelmerger.config`. La división responde al hecho de que cada bloque de validación era independiente y solo compartía la lista `errors` acumulada — una cohesión baja que justifica el split, a diferencia de los otros dos orquestadores grandes (`MesSheetBuilder`, `SummarySheetBuilder`) cuya lógica sí está fuertemente acoplada y por tanto se quedan tal cual hasta una eventual Sesión F2.
+
+### API afectada
+
+`ConfigValidator` ha cambiado de paquete:
+
+- Antes: `com.excelmerger.ConfigValidator`
+- Ahora: `com.excelmerger.config.ConfigValidator`
+
+La firma del constructor y de `validate()` es idéntica:
+
+```java
+new ConfigValidator(configLoader).validate()  // -> List<String>
+```
+
+El orden de aparición de los errores en la lista devuelta es **bit-a-bit el mismo** que en v2.4.0. Los 298 tests existentes pasan sin tocar ninguna aserción; el único cambio en `ConfigValidatorTest.java` y `ExcelMergerIntegrationTest.java` es añadir el `import com.excelmerger.config.ConfigValidator;`.
+
+`Main.java` y `TestFixtures.java` actualizan únicamente el import / el `@link` correspondiente. Ningún otro fichero del proyecto importa `ConfigValidator` directamente.
+
+### Tests
+
+Se añaden tres ficheros pequeños de test bajo `src/test/java/com/excelmerger/config/`:
+
+- `ValidationHelpersTest` — cubre `parseCsv`, `isBlank` y el contrato de mutación de `errors` de `parsePositiveInt`.
+- `MesConfigSectionTest` — un test representativo por cada uno de los cinco tipos de columna MES, instanciando la sección directamente sin pasar por `ConfigValidator`.
+- `SummaryConfigSectionTest` — ancla la sección de resumen, que hasta ahora solo tenía cobertura indirecta.
+
+Cobertura post-refactor (esperada, a confirmar tras `mvnw verify`): orquestador `ConfigValidator` ≥95% instrucciones, cada `*ConfigSection` ≥85%.
+
+### PMD
+
+El refactor abre la puerta a quitar las exclusiones globales de `CognitiveComplexity / CyclomaticComplexity / NPathComplexity / NcssCount / GodClass / TooManyFields / TooManyMethods` del `pmd-ruleset.xml`. **No se quitan en esta release** porque las exclusiones son globales (no por fichero) y los otros dos orquestadores (`MesSheetBuilder`, `SummarySheetBuilder`) las siguen necesitando. La nota arquitectónica del ruleset se ha actualizado para reflejarlo. Una eventual Sesión F2 que aborde esos dos podrá retirarlas.
+
+### Decisión de versionado
+
+Refactor interno sin cambio funcional ni de API observable a usuarios finales. El bump a `2.5.0` (en lugar de `2.4.1`) responde a:
+
+- `ConfigValidator` cambia de FQN público (`com.excelmerger` → `com.excelmerger.config`). Aunque ningún cliente externo del proyecto lo importa, formalmente es un cambio de API.
+- La introducción de un subpaquete nuevo con siete colaboradores es una reorganización estructural lo bastante visible para auditores como para no enmascararla bajo un patch.
+
 ## [2.4.0] — Tablas pivot Petición × Matrícula en hojas de responsable
 
 Release minor. En los modos `output.mode=responsables` y `output.mode=completo`, cada hoja de responsable contiene ahora dos tablas pivot SUMIFS apiladas verticalmente:

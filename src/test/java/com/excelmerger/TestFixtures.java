@@ -24,7 +24,7 @@ import java.util.Properties;
  *       (las del {@code @TempDir} de cada test).</li>
  *   <li>Construir un {@link ConfigLoader} en memoria a partir de un {@link Properties}
  *       sin necesidad de escribir a disco (util para tests unitarios de
- *       {@link ConfigValidator} y similares).</li>
+ *       {@link com.excelmerger.config.ConfigValidator} y similares).</li>
  * </ul>
  *
  * <p>No usa logging para no introducir ruido en la salida de los tests.</p>
