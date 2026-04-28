@@ -232,7 +232,48 @@ La celda `A1` siempre muestra el **nombre canónico original** (sin sanear), apl
 
 #### Cabecera de cada hoja por responsable
 
-Por ahora **solo `A1`** con el nombre del responsable. En sesiones futuras se añadirán dos tablas de resumen (la decisión está documentada en CHANGELOG; el resto de la hoja queda vacío hasta entonces).
+La celda `A1` contiene el **nombre canónico del responsable** (con estilo título: negrita, 14 pt). A partir de v2.4.0, debajo se generan dos tablas pivot.
+
+#### Tablas pivot Petición × Matrícula (v2.4.0)
+
+Por defecto cada hoja de responsable contiene, debajo de `A1`, **dos tablas pivot SUMIFS** apiladas verticalmente:
+
+1. **Horas imputadas (Jira) por Petición × Matrícula.**
+2. **REAL por Petición × Matrícula.**
+
+Las tablas son fórmulas vivas contra `Resultado`, filtradas por el responsable cuyo nombre figura en `A1`. Las peticiones y matrículas que aparecen son únicamente las que ese responsable tiene en `Resultado` (no todas las del libro), por consistencia con la Tabla 2 de Resumen.
+
+```
+Excel row     Contenido (con responsable de 2 peticiones × 2 matrículas)
+─────────     ──────────────────────────────────────────────────────────────
+1             tresp1@x                                       (estilo título)
+2             — vacía —
+3             [merged] Horas imputadas (Jira) por Petición × Matrícula
+4             Petición  | M-1001  | M-1002  | Total
+5             P-001     | =SUMIFS | =SUMIFS | =SUM(B5:C5)
+6             P-002     | =SUMIFS | =SUMIFS | =SUM(B6:C6)
+7             Total     | =SUM    | =SUM    | =SUM(D5:D6)
+8, 9          — gap (configurable, default 2 filas) —
+10            [merged] REAL por Petición × Matrícula
+11            Petición  | M-1001  | M-1002  | Total
+12, 13, 14    … (idéntica estructura, columna REAL)
+```
+
+Las pivots se controlan con cuatro claves nuevas en `config.properties`:
+
+```properties
+# Habilita/deshabilita las tablas pivot. Default true (opt-out).
+responsables.tables.enabled=true
+
+# Títulos (literal en la fila merged).
+responsables.tables.jiraTitle=Horas imputadas (Jira) por Petición × Matrícula
+responsables.tables.realTitle=REAL por Petición × Matrícula
+
+# Filas en blanco entre las dos tablas. Admite 0. Default 2.
+responsables.tables.gapRows=2
+```
+
+El rango de los SUMIFS se acota con la clave existente `summary.sumifsMaxRow` (compartida con la hoja `Resumen`). Para preservar el comportamiento exacto de v2.3.0 (hoja con solo `A1`), añadir `responsables.tables.enabled=false`.
 
 #### Ejemplos de uso
 

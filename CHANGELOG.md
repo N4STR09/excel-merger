@@ -1,5 +1,80 @@
 # Changelog
 
+## [2.4.0] — Tablas pivot Petición × Matrícula en hojas de responsable
+
+Release minor. En los modos `output.mode=responsables` y `output.mode=completo`, cada hoja de responsable contiene ahora dos tablas pivot SUMIFS apiladas verticalmente:
+
+1. **Horas imputadas (Jira) por Petición × Matrícula.**
+2. **REAL por Petición × Matrícula.**
+
+Ambas son fórmulas vivas contra `Resultado`, filtradas por el responsable cuyo nombre figura en `A1`. Las peticiones y matrículas que aparecen son únicamente las que ese responsable tiene en `Resultado` (no todas las del libro), por consistencia con la Tabla 2 de Resumen.
+
+La feature es **opt-out**: si la clave `responsables.tables.enabled` está ausente o vale `true`, las pivots se generan; con `false`, las hojas quedan como en v2.3.0 (solo cabecera `A1`). Esto significa que un upgrade del binario sobre un `config.properties` v2.3.0 aporta la funcionalidad nueva **sin requerir cambios en la configuración**, lo que es consistente con la filosofía de defaults seguros del proyecto.
+
+### Claves nuevas en `config.properties`
+
+```properties
+# Habilita/deshabilita las tablas pivot. Default true.
+responsables.tables.enabled=true
+
+# Títulos de las dos tablas (literal en la fila merged).
+responsables.tables.jiraTitle=Horas imputadas (Jira) por Petición × Matrícula
+responsables.tables.realTitle=REAL por Petición × Matrícula
+
+# Filas en blanco entre las dos tablas. Admite 0. Default 2.
+responsables.tables.gapRows=2
+```
+
+El rango de los SUMIFS se acota con la clave existente `summary.sumifsMaxRow` (default 10000) — **se reutiliza** en lugar de introducir una clave separada para mantener el config plano.
+
+### Estructura por hoja de responsable
+
+```
+Excel row     Contenido
+─────────     ───────────────────────────────────────────────────────────────
+1             A1 = nombre canónico del responsable (estilo título, v2.3.0)
+2             — vacía —
+3             [merged] Horas imputadas (Jira) por Petición × Matrícula
+4             Petición | M-1001 | M-1002 | … | Total
+5..(4+nP)     P-001    | SUMIFS | SUMIFS | … | SUM(fila)
+5+nP          Total    | SUM    | SUM    | … | SUM(grand)
+6+nP, 7+nP    — gap (2 filas en blanco, configurable) —
+8+nP          [merged] REAL por Petición × Matrícula
+9+nP          Petición | M-1001 | M-1002 | … | Total
+10+nP..       … (idéntica estructura que la primera tabla, columna REAL)
+```
+
+### Semántica acordada (Fase 0)
+
+1. **Descubrimiento**: una sola pasada sobre `Resultado` produciendo `Map<String,ResponsableData>` con peticiones y matrículas por responsable. La clave del map es el responsable trimeado y en lowercase (mismo criterio v2.3.0). Eficiente: O(N×3) donde N es el número de filas de Resultado.
+2. **Orden de peticiones y matrículas**: numéricas ascendentes primero, no numéricas alfabético después (mismo criterio que `SummarySheetBuilder.discoverMatriculas`). Para no duplicar la regla por tercera vez, se ha extraído a `PoiUtils.mixedNumericLexicographicSort(Collection<String>)` con sus propios tests.
+3. **Total de fila + total de columna + gran total**: presentes en ambas tablas (mismo formato de `StyleFactory` que la Tabla 2 de Resumen).
+4. **Caso degenerado**: responsable sin peticiones (no debería ocurrir si está en Resultado, pero por defensividad), se escribe el título y debajo `(Sin datos)` sin filas SUMIFS.
+5. **SUMIFS bounds**: se reutiliza `summary.sumifsMaxRow` (default 10000) — no se introduce nueva clave.
+6. **Modo `cierre`**: completamente intacto. No se construyen hojas de responsable y por tanto no hay pivots.
+7. **Criterio del responsable en SUMIFS**: referencia absoluta `$A$1` de cada hoja (no literal). Esto evita problemas de escapado con caracteres especiales (`'`, `"`, `@`) y permite editar A1 manualmente sin romper las fórmulas.
+
+### Lecciones aplicadas
+
+- **1.7.1 — mismatch numérico/textual**: las cabeceras de matrícula y las celdas clave de petición se escriben **siempre como STRING**, incluso cuando son todo dígitos (e.g. `99641`, `55751`). Las columnas Petición y Matrícula de `Resultado` están marcadas como `asText.columns` desde 1.6.2, así que el SUMIFS compara string-string en ambos extremos. Si las cabeceras de pivot fueran NUMERIC, el SUMIFS daría 0. **Cubierto por test específico** (`ResponsablePivotBuilderTest.formulaEvaluatorRespetaCaseSinIgnorarFiltrosNumericos`).
+- **1.8.0 — recálculo de fórmulas**: cuando se generan pivots, se llama a `workbook.setForceFormulaRecalculation(true)` al final del builder. Sin esto, Excel/POI muestran los SUMIFS sin evaluar al abrir el fichero. Idempotente con `SummarySheetBuilder` que también lo setea.
+
+### Tests añadidos (todos verdes en mi código local; ver caveat de validación)
+
+- **`ResponsablePivotBuilderTest`** (7 tests): estructura, fórmula SUMIFS bien formada con 3 criterios, SUM de fila/columna, caso `(Sin datos)`, FormulaEvaluator sobre combinación conocida (5+3=8), regresión 1.7.1 con peticiones y matrículas todo dígitos, criterio responsable cambiando A1 dinámicamente, tipo STRING en cabecera de matrícula.
+- **`ResponsablesSheetBuilderV24Test`** (8 tests): dos pivots apiladas con gap, FormulaEvaluator sobre tabla Jira (gran total = 20), FormulaEvaluator sobre tabla REAL (gran total = 24), aislamiento entre responsables (tresp2@x no incluye filas de tresp1@x), `enabled=false` mantiene comportamiento v2.3.0, clave ausente equivale a `enabled=true`, `RunReport` registra resumen agregado con conteo correcto de filas (14 filas para 2×2), columna Jira ausente desactiva pivots con warning RESPONSABLE.
+- **`ResponsablesSheetBuilderTest`**: el helper `minimalConfig()` añade `responsables.tables.enabled=false`. Los **14 tests existentes mantienen sus aserciones intactas** (preservando el contrato v2.3.0 de "una sola fila por hoja").
+- **`ConfigValidatorTest`** (6 tests): `gapRows` válido / negativo / no numérico, `jiraTitle` blank, `realTitle` blank, claves ausentes (no error).
+- **`ExcelMergerIntegrationTest`** (5 tests): modo `responsables` genera dos pivots por hoja; comparación FormulaEvaluator(SUMIFS) == suma manual sobre Resultado para combinación P-001/M-1001/tresp1@x; modo `completo` mantiene Resumen y añade pivots; modo `cierre` sin cambios; `enabled=false` produce hojas v2.3.0.
+
+### Retrocompatibilidad
+
+- **Modo `cierre`**: 100% intacto.
+- **Configs v2.3.0**: funcionan tal cual; las pivots se activan automáticamente con el upgrade del binario (default `true`). Para preservar el comportamiento exacto v2.3.0, añadir `responsables.tables.enabled=false`.
+- **API pública**: sin cambios. `ResponsablesSheetBuilder.buildAll(Workbook)` mantiene su firma; `ResponsablePivotBuilder` es package-private.
+
+---
+
 ## [2.3.0] — Modos de generación (`output.mode`)
 
 Release minor. Añade la clave `output.mode` para seleccionar **qué hojas se generan** en el libro de salida. Tres modos:

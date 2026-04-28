@@ -1975,4 +1975,296 @@ class ExcelMergerIntegrationTest {
         }
         assertThat(report.getOutputMode()).isEqualTo(OutputMode.CIERRE);
     }
+
+    // ==================================================================
+    //  v2.4.0 — Tablas pivot por hoja de responsable
+    // ==================================================================
+
+    /**
+     * En modo {@code responsables}, cada hoja de responsable debe contener
+     * dos tablas pivot SUMIFS (Jira y REAL) apiladas verticalmente, ademas
+     * de la cabecera A1 (v2.3.0).
+     *
+     * <p>Verifica la estructura: titulo Jira, cabecera con matriculas,
+     * datos, totales, gap, titulo REAL, cabecera, datos, totales.</p>
+     */
+    @Test
+    void v240ResponsablesGeneraDosTablasPivotPorHoja(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "responsables");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet sheet = wb.getSheet("tresp1@x");
+            assertThat(sheet).as("hoja tresp1@x").isNotNull();
+
+            // Cabecera A1
+            assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("tresp1@x");
+
+            // Titulo de la primera tabla en row 2 (0-based)
+            String title1 = sheet.getRow(2).getCell(0).getStringCellValue();
+            assertThat(title1).as("titulo tabla Jira").contains("Jira");
+
+            // La cabecera de la tabla Jira debe estar en row 3 con "Petición"
+            // como primer encabezado.
+            assertThat(sheet.getRow(3).getCell(0).getStringCellValue()).isEqualTo("Petición");
+
+            // Hay una segunda tabla en algún punto más abajo cuyo título
+            // contiene "REAL". La buscamos sin asumir índice exacto.
+            int realTitleRow = -1;
+            for (int r = 4; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null) continue;
+                if (c0.getCellType() == CellType.STRING
+                        && c0.getStringCellValue().contains("REAL")
+                        && c0.getStringCellValue().contains("Petición")) {
+                    realTitleRow = r;
+                    break;
+                }
+            }
+            assertThat(realTitleRow).as("titulo tabla REAL encontrado").isPositive();
+        }
+    }
+
+    /**
+     * Verifica que las fórmulas SUMIFS de las pivots evalúan a los valores
+     * esperados según los datos de los fixtures (lección 1.7.1).
+     *
+     * <p>Combinacion conocida usada: tresp1@x / P-001 / M-1001.
+     * En cierre.xlsx hay una fila P-001/Recurso=M-1001/Responsable=tresp1@x
+     * con Horas_RealizadoTot=12. Es la única ocurrencia de esa combinación
+     * para tresp1@x.</p>
+     *
+     * <p>Como Jira y REAL en Resultado se calculan a partir de cruces, el
+     * valor exacto depende del fixture. Para no acoplarse a aritmética
+     * exacta, este test verifica únicamente: (a) que el SUMIFS evalúa sin
+     * error, (b) que el valor es no negativo, (c) que coincide con la
+     * suma manual de las celdas correspondientes en Resultado filtradas
+     * por responsable=tresp1@x, peticion=P-001, matricula=M-1001.</p>
+     */
+    @Test
+    void v240ResponsablesFormulaEvaluatorSumifsCoincideConSumaManual(@TempDir Path tmp)
+            throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "responsables");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet sheet = wb.getSheet("tresp1@x");
+            assertThat(sheet).isNotNull();
+
+            // Calcular la suma manual a partir de Resultado.
+            Sheet resultado = wb.getSheet("Resultado");
+            int colPet = findHeaderIndex(resultado, "Petición");
+            int colMat = findHeaderIndex(resultado, "Matrícula");
+            int colResp = findHeaderIndex(resultado, "Res. Tecnico");
+            int colJira = findHeaderIndex(resultado, "Jira");
+            assertThat(colPet).as("col Petición").isNotNegative();
+            assertThat(colMat).as("col Matrícula").isNotNegative();
+            assertThat(colResp).as("col Res. Tecnico").isNotNegative();
+            assertThat(colJira).as("col Jira").isNotNegative();
+
+            FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
+
+            double manualSum = 0;
+            for (int r = 1; r <= resultado.getLastRowNum(); r++) {
+                Row row = resultado.getRow(r);
+                if (row == null) continue;
+                String pet = stringOf(row.getCell(colPet));
+                String mat = stringOf(row.getCell(colMat));
+                String resp = stringOf(row.getCell(colResp));
+                if (!"P-001".equals(pet)) continue;
+                if (!"M-1001".equals(mat)) continue;
+                // SUMIFS de Excel es case-insensitive, asi que usamos
+                // equalsIgnoreCase(trim) para replicar exactamente el mismo
+                // comportamiento. NO usar contains: harìa match espurio.
+                if (resp == null || !"tresp1@x".equalsIgnoreCase(resp.trim())) continue;
+                Cell jc = row.getCell(colJira);
+                if (jc == null) continue;
+                CellValue cv = ev.evaluate(jc);
+                if (cv != null && cv.getCellType() == CellType.NUMERIC) {
+                    manualSum += cv.getNumberValue();
+                }
+            }
+
+            // Localizar P-001 en la tabla Jira de tresp1@x y leer la
+            // columna M-1001. Buscamos el row donde A.value == "P-001"
+            // entre las filas de la primera pivot (que empieza en row 2
+            // con titulo + cabecera + datos). La cabecera de matriculas
+            // está en row 3.
+            Row matrHeaderRow = sheet.getRow(3);
+            int m1001Col = -1;
+            for (int c = 1; c < matrHeaderRow.getLastCellNum(); c++) {
+                Cell hc = matrHeaderRow.getCell(c);
+                if (hc != null && "M-1001".equals(hc.getStringCellValue())) {
+                    m1001Col = c;
+                    break;
+                }
+            }
+            assertThat(m1001Col).as("columna M-1001 en tabla Jira").isPositive();
+
+            int p001Row = -1;
+            for (int r = 4; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null) continue;
+                // Parar al llegar al "Total" o a la fila de gap
+                if (c0.getCellType() == CellType.STRING
+                        && "Total".equals(c0.getStringCellValue())) {
+                    break;
+                }
+                if (c0.getCellType() == CellType.STRING
+                        && "P-001".equals(c0.getStringCellValue())) {
+                    p001Row = r;
+                    break;
+                }
+            }
+            assertThat(p001Row).as("fila P-001 en tabla Jira").isPositive();
+
+            CellValue pivotValue = ev.evaluate(sheet.getRow(p001Row).getCell(m1001Col));
+            assertThat(pivotValue.getCellType()).isEqualTo(CellType.NUMERIC);
+            assertThat(pivotValue.getNumberValue())
+                    .as("SUMIFS pivot tresp1@x P-001 x M-1001 == suma manual")
+                    .isEqualTo(manualSum);
+        }
+    }
+
+    /** Helper local para encontrar índice de columna por nombre de cabecera. */
+    private static int findHeaderIndex(Sheet sheet, String headerName) {
+        Row hdr = sheet.getRow(0);
+        if (hdr == null) return -1;
+        for (int c = 0; c < hdr.getLastCellNum(); c++) {
+            Cell cell = hdr.getCell(c);
+            if (cell == null) continue;
+            if (cell.getCellType() == CellType.STRING
+                    && headerName.equals(cell.getStringCellValue())) {
+                return c;
+            }
+        }
+        return -1;
+    }
+
+    /** Helper local que devuelve el contenido de una celda como String. */
+    private static String stringOf(Cell cell) {
+        if (cell == null) return null;
+        if (cell.getCellType() == CellType.STRING) return cell.getStringCellValue();
+        if (cell.getCellType() == CellType.NUMERIC) {
+            double d = cell.getNumericCellValue();
+            return (d == (long) d) ? String.valueOf((long) d) : String.valueOf(d);
+        }
+        return null;
+    }
+
+    /**
+     * En modo {@code completo}, las hojas de responsable también deben tener
+     * sus dos tablas pivot, sin afectar a la generación de Resumen.
+     */
+    @Test
+    void v240CompletoTieneResumenYTablasPivotEnHojasResponsable(@TempDir Path tmp)
+            throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "completo");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            assertThat(wb.getSheet("Resumen")).as("Resumen presente en completo").isNotNull();
+
+            Sheet sheet = wb.getSheet("tresp1@x");
+            assertThat(sheet).as("hoja tresp1@x").isNotNull();
+
+            // Verifica presencia de las dos pivots: titulo Jira y titulo REAL.
+            String title1 = sheet.getRow(2).getCell(0).getStringCellValue();
+            assertThat(title1).contains("Jira");
+
+            // Buscar el segundo titulo más abajo con "REAL"
+            boolean foundReal = false;
+            for (int r = 4; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null || c0.getCellType() != CellType.STRING) continue;
+                if (c0.getStringCellValue().contains("REAL")
+                        && c0.getStringCellValue().contains("Petición")) {
+                    foundReal = true;
+                    break;
+                }
+            }
+            assertThat(foundReal).as("segunda tabla REAL en hoja de responsable").isTrue();
+        }
+    }
+
+    /**
+     * En modo {@code cierre}, no se generan hojas de responsable y por tanto
+     * tampoco tablas pivot. El comportamiento debe ser idéntico al de v2.3.0.
+     */
+    @Test
+    void v240CierreNoTieneTablasPivotPorqueNoTieneHojasResponsable(@TempDir Path tmp)
+            throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "cierre");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            // En cierre, las hojas de responsable NO existen.
+            assertThat(wb.getSheet("tresp1@x")).as("no hay hoja tresp1@x en cierre").isNull();
+            assertThat(wb.getSheet("tresp2@x")).isNull();
+            assertThat(wb.getSheet("tresp3@x")).isNull();
+            // Pero Resumen y Resultado sí.
+            assertThat(wb.getSheet("Resumen")).isNotNull();
+            assertThat(wb.getSheet("Resultado")).isNotNull();
+        }
+    }
+
+    /**
+     * Si {@code responsables.tables.enabled=false}, las hojas de responsable
+     * en modo responsables/completo deben quedar como en v2.3.0
+     * (solo cabecera A1, sin pivots).
+     */
+    @Test
+    void v240FlagOffMantieneHojasResponsableComoV230(@TempDir Path tmp) throws IOException {
+        // Construir el config base con modo responsables y luego sobreescribir
+        // la flag de tablas a false manualmente sobre el fichero ya renderizado.
+        ConfigLoader baseCfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "responsables");
+        Path cfgPath = tmp.resolve("test-config.properties");
+        String content = Files.readString(cfgPath);
+        // Reemplazar la línea responsables.tables.enabled=true por =false
+        content = content.replaceAll(
+                "(?m)^responsables\\.tables\\.enabled=.*$",
+                "responsables.tables.enabled=false");
+        // Si no estaba presente, añadirla.
+        if (!content.contains("responsables.tables.enabled=false")) {
+            content += System.lineSeparator() + "responsables.tables.enabled=false";
+        }
+        Files.writeString(cfgPath, content);
+        ConfigLoader cfg = new ConfigLoader(cfgPath.toString());
+        // Aseguramos que el override realmente se aplicó
+        assertThat(cfg.getBoolean("responsables.tables.enabled", true)).isFalse();
+
+        // baseCfg ya no se usa: lo retenemos para mantener test legible
+        assertThat(baseCfg).isNotNull();
+
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet sheet = wb.getSheet("tresp1@x");
+            assertThat(sheet).isNotNull();
+            // Solo fila 0 (cabecera A1).
+            assertThat(sheet.getLastRowNum()).as("solo cabecera A1, sin pivots").isZero();
+            assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("tresp1@x");
+        }
+    }
 }

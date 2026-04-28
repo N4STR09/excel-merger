@@ -99,6 +99,11 @@ class MainTest {
         //        trim + case-insensitive, orden Collator es_ES). Switch de
         //        modos en ExcelMerger.merge: en RESPONSABLES omite Resumen
         //        y la copia del input Deuda. Ver CHANGELOG [2.3.0].
-        assertThat(Main.APP_VERSION).isEqualTo("2.3.0");
+        // 2.4.0: tablas pivot Peticion x Matricula en cada hoja de
+        //        responsable (modos responsables y completo). Dos tablas
+        //        SUMIFS (Jira y REAL) filtradas por A1, opt-out via
+        //        responsables.tables.enabled=false. Nuevo helper
+        //        ResponsablePivotBuilder. Ver CHANGELOG [2.4.0].
+        assertThat(Main.APP_VERSION).isEqualTo("2.4.0");
     }
 }

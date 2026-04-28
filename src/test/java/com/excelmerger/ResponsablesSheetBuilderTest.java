@@ -49,11 +49,18 @@ class ResponsablesSheetBuilderTest {
      * ConfigLoader minimo apto para alimentar al builder. Solo necesita
      * mes.sheetName (default "MES"; aqui apuntamos a "Resultado") y
      * summary.byResponsible.column (default "Res. Tecnico").
+     *
+     * <p>v2.4.0: se desactivan explicitamente las tablas pivot
+     * ({@code responsables.tables.enabled=false}) para preservar los
+     * contratos de los tests v2.3.0 (hoja con solo cabecera A1, 1 fila).
+     * Tests especificos de v2.4.0 (que esperan pivots) usan otro helper
+     * en {@link ResponsablesSheetBuilderV24Test}.</p>
      */
     private ConfigLoader minimalConfig() {
         Properties p = new Properties();
         p.setProperty("mes.sheetName", "Resultado");
         p.setProperty("summary.byResponsible.column", "Res. Tecnico");
+        p.setProperty("responsables.tables.enabled", "false");
         return TestFixtures.configFromProperties(p);
     }
 
