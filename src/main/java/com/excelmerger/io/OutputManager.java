@@ -16,6 +16,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.function.Supplier;
 
 /**
  * Gestion del fichero de salida: detecta locks, aplica politica de overwrite
@@ -27,6 +28,13 @@ public final class OutputManager {
     private static final Logger log = LoggerFactory.getLogger(OutputManager.class);
     private static final DateTimeFormatter BACKUP_TS =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss");
+
+    /**
+     * Reloj inyectable para tests (acceso package-private). En produccion devuelve
+     * {@link LocalDateTime#now()}. Permite a {@code OutputManagerTest} fijar el
+     * timestamp y ejercitar la rama de colision en {@link #backupOutput(Path)}.
+     */
+    Supplier<LocalDateTime> clockForTesting = LocalDateTime::now;
 
     /**
      * Chequeo previo: si existe un lock {@code ~$...} para el fichero de
@@ -91,7 +99,7 @@ public final class OutputManager {
         int dot = fileName.lastIndexOf('.');
         String base = (dot > 0) ? fileName.substring(0, dot) : fileName;
         String ext = (dot > 0) ? fileName.substring(dot) : "";
-        String ts = LocalDateTime.now().format(BACKUP_TS);
+        String ts = clockForTesting.get().format(BACKUP_TS);
 
         Path parent = out.getParent();
         if (parent == null) parent = Paths.get(".");

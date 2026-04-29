@@ -75,7 +75,10 @@ public final class FileLockDetector {
 
     /**
      * Heuristica para identificar errores de fichero bloqueado en distintas
-     * plataformas (Windows y Linux producen mensajes diferentes).
+     * plataformas y locales. Windows en ingles produce mensajes como
+     * "being used by another process" o "the process cannot access"; el
+     * mismo Windows en espanol produce "otro proceso tiene bloqueada"
+     * o "el proceso no tiene acceso". Linux/Mac usan "permission denied".
      */
     public static boolean looksLikeLocked(Throwable e) {
         Throwable cur = e;
@@ -88,7 +91,9 @@ public final class FileLockDetector {
                         || low.contains("the process cannot access")
                         || low.contains("access is denied")
                         || low.contains("permission denied")
-                        || low.contains("sharing violation")) {
+                        || low.contains("sharing violation")
+                        || low.contains("otro proceso tiene bloqueada")
+                        || low.contains("el proceso no tiene acceso")) {
                     return true;
                 }
             }

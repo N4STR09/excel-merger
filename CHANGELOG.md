@@ -1,5 +1,79 @@
 # Changelog
 
+## [2.5.1] — Cobertura del paquete `com.excelmerger.io` (+ fix detección de locks en Windows ES)
+
+Release patch. **El contrato externo es idéntico al de v2.5.0**: misma CLI, mismo `config.properties`, mismo output, mismos códigos de salida, misma API pública. Si tu deployment usa v2.5.0, este binario lo sustituye sin requerir cambios.
+
+El paquete `com.excelmerger.io` (cuatro clases: `FileLockDetector`, `OutputManager`, `InputFileDetector`, `SheetCopier`) carecía de tests propios; toda su cobertura provenía de tests de integración, que solo ejercitan los caminos felices. JaCoCo reportaba 27% inst / 11% branch en `FileLockDetector` y 55% inst / 53% branch en `OutputManager`, dejando descubiertos los `catch` de `IOException` / `FileNotFoundException`, los caminos de fallback cuando un fichero está bloqueado, y la heurística `looksLikeLocked` casi entera. Esta release sube esos números por encima del umbral del proyecto.
+
+Durante la escritura de los tests SO-específicos en Windows se descubrió un bug latente: `FileLockDetector.looksLikeLocked` solo reconocía mensajes de error en inglés, así que en una máquina Windows con locale español el mensaje *"El proceso no tiene acceso al archivo porque otro proceso tiene bloqueada una parte del archivo"* no se identificaba como un lock y el usuario veía *"No se puede leer …"* en lugar de *"Cierra '<fichero>.xlsx' antes de ejecutar"*. Esta release corrige ese fallo añadiendo dos patrones en español a la heurística (ver "Cambios en producción" abajo).
+
+### Tests
+
+Se añaden dos ficheros nuevos bajo `src/test/java/com/excelmerger/io/`:
+
+- `FileLockDetectorTest` (11 tests) — cubre `assertNotLocked` (con y sin lock `~$`, fichero inexistente, fichero bloqueado), `openForRead` (happy path y error genérico) y `looksLikeLocked` con sus ocho patrones de mensaje (seis en inglés: `being used by another process`, `used by another process`, `the process cannot access`, `access is denied`, `permission denied`, `sharing violation`; dos en español: `otro proceso tiene bloqueada`, `el proceso no tiene acceso`) más la traversal de la cause-chain.
+- `OutputManagerTest` (20 tests) — cubre `assertOutputWritable` (con lock, con path raíz), `prepareOutputFile` (happy paths con y sin overwrite/backup, error de `createDirectories` por componente intermedio que es fichero), `backupOutput` (con extensión, sin extensión, con punto inicial tipo `.hidden`, con path sin padre, con raíz, con `history` ya creado como fichero, con colisión de timestamp) y `writeResult` (happy path, error genérico, error "locked-like" en Linux/Mac).
+
+Tres tests son SO-específicos y se marcan con `@EnabledOnOs`:
+
+- En Windows (`OS.WINDOWS`) se usa `FileChannel.lock()` sobre un `RandomAccessFile` para reproducir el escenario "fichero abierto en Excel": un `FileInputStream` concurrente lanza `IOException` que ahora `looksLikeLocked` reconoce tanto en locale en como en es.
+- En Linux/Mac (`OS.LINUX`, `OS.MAC`) se usan permisos POSIX (`Files.setPosixFilePermissions`) para provocar "Permission denied" — patrón también reconocido por `looksLikeLocked` — y `Paths.get("/")` para cubrir la rama `getFileName() == null`. Estos tests se auto-saltan si el usuario que ejecuta es `root` (en CI con Docker) porque root ignora los permisos POSIX.
+
+Cero `Thread.sleep`, cero recursos compartidos fuera de `@TempDir`. Los tests con paths relativos (sin padre) tienen cleanup explícito en `@AfterEach`. Sin nuevas dependencias: la suite sigue con JUnit 5 + AssertJ + POI.
+
+### Cambios en producción
+
+Dos modificaciones, ambas mínimas y sin impacto en API pública.
+
+**1. `FileLockDetector.looksLikeLocked` reconoce mensajes en español.** La heurística que clasifica una `IOException` como "fichero bloqueado por otro proceso" se basa en buscar subcadenas conocidas dentro del mensaje. Hasta v2.5.0 solo conocía las versiones inglesas que produce el JDK en Windows con locale en (`being used by another process`, `the process cannot access`, etc.). En Windows con locale español el JDK devuelve traducciones — `"otro proceso tiene bloqueada"`, `"el proceso no tiene acceso"` — que la heurística no detectaba, y el `catch` caía al fallback genérico. v2.5.1 añade ambos patrones a la lista, manteniendo todos los anteriores. La firma del método y su semántica (`true` = parece un lock) son idénticas.
+
+Patrones añadidos (sobre el mensaje pasado por `toLowerCase(Locale.ROOT)`):
+
+- `otro proceso tiene bloqueada`
+- `el proceso no tiene acceso`
+
+No se añaden patrones para idiomas que no hayan sido verificados experimentalmente. Si en el futuro un usuario reporta un mensaje en otro locale, se incorporará en otro patch.
+
+**2. `OutputManager` introduce un `Supplier<LocalDateTime>` package-private.**
+
+```java
+// Antes:
+String ts = LocalDateTime.now().format(BACKUP_TS);
+
+// Ahora:
+Supplier<LocalDateTime> clockForTesting = LocalDateTime::now;  // campo de instancia
+...
+String ts = clockForTesting.get().format(BACKUP_TS);
+```
+
+El campo es package-private (sin getter/setter) y permite a `OutputManagerTest` fijar un timestamp constante para ejercitar el bucle `while (Files.exists(target))` que aplica el sufijo `_2`, `_3`, etc. cuando dos backups caen en el mismo segundo. En producción el `Supplier` por defecto sigue siendo `LocalDateTime::now` y el comportamiento es idéntico al de v2.5.0.
+
+### Cobertura
+
+Predicción conservadora a confirmar tras `mvnw verify`:
+
+- `FileLockDetector`: ≥ 90% inst / ≥ 85% branch (vs 27% / 11% en v2.5.0).
+- `OutputManager`: ≥ 88% inst / ≥ 80% branch (vs 55% / 53% en v2.5.0).
+
+`InputFileDetector` (87% / 72%) y `SheetCopier` (94% / 89%) se quedan intactos: ni se tocan ni se les añaden tests.
+
+### Ramas defensivas no testeadas
+
+Dos ramas quedan documentadas como no cubiertas:
+
+- **`OutputManager.backupOutput`, fallback `ATOMIC_MOVE` → `REPLACE_EXISTING`** (líneas ~115–122). Solo se alcanza cuando `Files.move` con `ATOMIC_MOVE` falla y el segundo intento con `REPLACE_EXISTING` tiene éxito — escenario típico de mover entre filesystems distintos. Reproducirlo de forma determinista exigiría Mockito o un FS especial. Coste: ~6 instrucciones, 1 branch.
+- **`OutputManager.writeResult`, rama `looksLikeLocked == true` en Windows.** En Windows, `FileChannel.lock()` no impide que un `FileOutputStream` concurrente abra el descriptor (solo bloquea I/O), y el fallo se manifiesta dentro de POI como `OpenXML4JRuntimeException` durante `result.write(fos)`, no como `IOException` en la apertura. El `catch` solo captura `FileNotFoundException`/`IOException`, así que el `RuntimeException` se propaga sin envolver. Esa rama queda cubierta indirectamente en CI Linux/Mac (vía POSIX permissions) pero no se ejercita en Windows. Coste en branch: cubierto en Linux/Mac, no testeable en Windows sin mockear POI.
+
+### Decisión de versionado
+
+Patch (`2.5.0` → `2.5.1`) y no minor. Hay dos modificaciones en producción, pero ninguna es funcionalidad nueva ni cambio de API:
+
+- El fix de `looksLikeLocked` (patrones en español) es una **corrección de un bug existente**: el método ya prometía detectar locks "en distintas plataformas", pero su implementación lo hacía solo para inglés. SemVer trata las correcciones de bugs como PATCH.
+- El `Supplier<LocalDateTime>` en `OutputManager` es un hook de testabilidad invisible desde fuera: campo package-private, sin getter/setter, sin cambio en comportamiento por defecto.
+
+Ningún cliente del proyecto cambia. Ningún test de integración existente cambia. La salida del programa para los mismos inputs es la misma — salvo en el escenario concreto de Windows ES con un fichero abierto en Excel, donde antes se mostraba un mensaje genérico y ahora el mensaje correcto "Cierra '<fichero>.xlsx' antes de ejecutar".
+
 ## [2.5.0] — Refactor estructural de `ConfigValidator` (Sesión F, parte 1)
 
 Release minor sin cambios funcionales. **El contrato externo es idéntico al de v2.4.0**: misma CLI, mismo `config.properties`, mismo output, mismos códigos de salida. Si tu deployment usa v2.4.0, este binario lo sustituye sin requerir cambios.

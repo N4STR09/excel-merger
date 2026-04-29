@@ -112,6 +112,19 @@ class MainTest {
         //        com.excelmerger.ConfigValidator a
         //        com.excelmerger.config.ConfigValidator; firma intacta.
         //        Ver CHANGELOG [2.5.0].
-        assertThat(Main.APP_VERSION).isEqualTo("2.5.0");
+        // 2.5.1: cobertura del paquete com.excelmerger.io + fix de
+        //        deteccion de locks en Windows ES. Sin cambios funcionales
+        //        salvo el caso concreto de Windows con locale espanol y un
+        //        fichero abierto en Excel: antes se mostraba "No se puede
+        //        leer..." (mensaje generico), ahora el mensaje correcto
+        //        "Cierra '<fichero>.xlsx' antes de ejecutar".
+        //        Anade FileLockDetectorTest (11 tests) y OutputManagerTest
+        //        (20 tests). En produccion: un Supplier<LocalDateTime>
+        //        package-private en OutputManager para testar la rama de
+        //        colision de timestamp en backupOutput, y dos patrones en
+        //        espanol ("otro proceso tiene bloqueada", "el proceso no
+        //        tiene acceso") en FileLockDetector.looksLikeLocked.
+        //        Ver CHANGELOG [2.5.1].
+        assertThat(Main.APP_VERSION).isEqualTo("2.5.1");
     }
 }
