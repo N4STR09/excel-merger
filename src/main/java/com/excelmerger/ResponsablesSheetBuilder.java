@@ -38,7 +38,7 @@ import java.util.Set;
  * apiladas verticalmente:</p>
  * <ol>
  *   <li>Horas imputadas (Jira) por Petición × Matrícula.</li>
- *   <li>REAL por Petición × Matrícula.</li>
+ *   <li>Facturar por Petición × Matrícula.</li>
  * </ol>
  *
  * <p>Las pivots son SUMIFS vivos contra Resultado, filtrados por el
@@ -90,14 +90,20 @@ public class ResponsablesSheetBuilder {
     private static final String COL_PETICION = "Petición";
     private static final String COL_MATRICULA = "Matrícula";
     private static final String COL_JIRA = "Jira";
-    private static final String COL_REAL = "REAL";
+    private static final String COL_FACTURAR = "Facturar";
     private static final String COL_RESPONSABLE = "Res. Tecnico";
 
     /** Defaults v2.4.0 — claves nuevas. */
     private static final String DEFAULT_JIRA_TITLE =
             "Horas imputadas (Jira) por Petición × Matrícula";
-    private static final String DEFAULT_REAL_TITLE =
-            "REAL por Petición × Matrícula";
+    /**
+     * v2.6.0: la columna y el titulo se renombran de REAL a Facturar.
+     * El default acompaña al rename. Si tenias responsables.tables.realTitle
+     * en config.properties, renombra la clave a responsables.tables.facturarTitle
+     * (no hay alias retrocompat).
+     */
+    private static final String DEFAULT_FACTURAR_TITLE =
+            "Facturar por Petición × Matrícula";
     private static final int DEFAULT_GAP_ROWS = 2;
 
     private final ConfigLoader config;
@@ -312,7 +318,7 @@ public class ResponsablesSheetBuilder {
 
     /**
      * Devuelve las letras Excel de las columnas Petición, Matrícula,
-     * Res. Tecnico, Jira y REAL en la hoja Resultado. Si alguna falta y
+     * Res. Tecnico, Jira y Facturar en la hoja Resultado. Si alguna falta y
      * las tablas están habilitadas, registra un warning y devuelve {@code null}
      * (lo que desactiva las pivots para todas las hojas en esta ejecución).
      * Si las tablas están deshabilitadas, devuelve {@code null} sin warning.
@@ -325,14 +331,14 @@ public class ResponsablesSheetBuilder {
         String matLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_MATRICULA);
         String respLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_RESPONSABLE);
         String jiraLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_JIRA);
-        String realLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_REAL);
+        String facturarLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_FACTURAR);
 
         List<String> missing = new ArrayList<>();
         if (petLetter == null) missing.add(COL_PETICION);
         if (matLetter == null) missing.add(COL_MATRICULA);
         if (respLetter == null) missing.add(COL_RESPONSABLE);
         if (jiraLetter == null) missing.add(COL_JIRA);
-        if (realLetter == null) missing.add(COL_REAL);
+        if (facturarLetter == null) missing.add(COL_FACTURAR);
         if (!missing.isEmpty()) {
             String msg = "Tablas pivot por responsable omitidas: columna(s) ausente(s) en '"
                     + resultadoName + "': " + String.join(", ", missing) + ".";
@@ -340,7 +346,7 @@ public class ResponsablesSheetBuilder {
             report.addWarning(WARN_CATEGORY, msg);
             return null;
         }
-        return new ColumnLetters(petLetter, matLetter, respLetter, jiraLetter, realLetter);
+        return new ColumnLetters(petLetter, matLetter, respLetter, jiraLetter, facturarLetter);
     }
 
     // ==================================================================
@@ -348,7 +354,7 @@ public class ResponsablesSheetBuilder {
     // ==================================================================
 
     /**
-     * Escribe las dos tablas pivot (Jira y REAL) en {@code sheet} y devuelve
+     * Escribe las dos tablas pivot (Jira y Facturar) en {@code sheet} y devuelve
      * el indice 0-based de la última fila ocupada (para calcular cuántas filas
      * tiene la hoja en el {@link RunReport}).
      */
@@ -361,7 +367,11 @@ public class ResponsablesSheetBuilder {
 
         int sumifsMaxRow = Math.max(2, config.getInt("summary.sumifsMaxRow", 10000));
         String jiraTitle = config.get("responsables.tables.jiraTitle", DEFAULT_JIRA_TITLE);
-        String realTitle = config.get("responsables.tables.realTitle", DEFAULT_REAL_TITLE);
+        // v2.6.0: la clave era "responsables.tables.realTitle" hasta v2.5.1.
+        // Sin alias retrocompat: si se usa la clave vieja, el codigo aplica
+        // el default (Facturar por Petición × Matrícula). Documentado en
+        // CHANGELOG seccion Migración.
+        String facturarTitle = config.get("responsables.tables.facturarTitle", DEFAULT_FACTURAR_TITLE);
         int gapRows = Math.max(0,
                 config.getInt("responsables.tables.gapRows", DEFAULT_GAP_ROWS));
 
@@ -377,19 +387,19 @@ public class ResponsablesSheetBuilder {
         ResponsablePivotBuilder.PivotResult jiraResult =
                 pivot.writeTable(wb, sheet, 2, jiraInputs);
 
-        // Tabla 2 (REAL) — empieza tras la primera + gapRows filas en blanco.
-        int realStartRow0 = jiraResult.lastRow0 + 1 + gapRows;
+        // Tabla 2 (Facturar) — empieza tras la primera + gapRows filas en blanco.
+        int facturarStartRow0 = jiraResult.lastRow0 + 1 + gapRows;
 
-        ResponsablePivotBuilder.PivotInputs realInputs = new ResponsablePivotBuilder.PivotInputs(
+        ResponsablePivotBuilder.PivotInputs facturarInputs = new ResponsablePivotBuilder.PivotInputs(
                 resultadoName,
-                letters.peticion, letters.matricula, letters.responsable, letters.real,
-                realTitle,
+                letters.peticion, letters.matricula, letters.responsable, letters.facturar,
+                facturarTitle,
                 peticionesSorted, matriculasSorted,
                 sumifsMaxRow);
-        ResponsablePivotBuilder.PivotResult realResult =
-                pivot.writeTable(wb, sheet, realStartRow0, realInputs);
+        ResponsablePivotBuilder.PivotResult facturarResult =
+                pivot.writeTable(wb, sheet, facturarStartRow0, facturarInputs);
 
-        return realResult.lastRow0;
+        return facturarResult.lastRow0;
     }
 
     // ==================================================================
@@ -443,15 +453,15 @@ public class ResponsablesSheetBuilder {
         final String matricula;
         final String responsable;
         final String jira;
-        final String real;
+        final String facturar;
 
         ColumnLetters(String peticion, String matricula, String responsable,
-                      String jira, String real) {
+                      String jira, String facturar) {
             this.peticion = peticion;
             this.matricula = matricula;
             this.responsable = responsable;
             this.jira = jira;
-            this.real = real;
+            this.facturar = facturar;
         }
     }
 }

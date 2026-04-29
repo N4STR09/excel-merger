@@ -46,7 +46,7 @@ class SummarySheetBuilderTest {
         p.setProperty("summary.sheetName", "Resumen");
         p.setProperty("summary.sumSheet", "Resultado");
         p.setProperty("summary.matriculaColumn", "Matrícula");
-        p.setProperty("summary.valueColumns", "Jira,REAL,PDCL,PDCL + Deuda");
+        p.setProperty("summary.valueColumns", "Jira,Facturar,PDCL,PDCL + Deuda");
         p.setProperty("summary.sumifsMaxRow", "10000");
         return p;
     }
@@ -58,7 +58,7 @@ class SummarySheetBuilderTest {
     private static Workbook buildResultadoWorkbook() {
         Workbook wb = new XSSFWorkbook();
         Sheet res = wb.createSheet("Resultado");
-        writeRow(res, 0, "Petición", "Matrícula", "Jira", "REAL", "PDCL", "PDCL + Deuda");
+        writeRow(res, 0, "Petición", "Matrícula", "Jira", "Facturar", "PDCL", "PDCL + Deuda");
         writeRow(res, 1, "P-001", "99641",       5.0,  6.0,  7.0,  7.5);
         writeRow(res, 2, "P-002", "99642",       3.0,  3.6,  4.0,  4.2);
         writeRow(res, 3, "P-003", "99641",       2.0,  2.4,  3.0,  3.0);
@@ -188,7 +188,7 @@ class SummarySheetBuilderTest {
             Row hdr = resumen.getRow(2);
             assertThat(hdr.getCell(0).getStringCellValue()).isEqualTo("Matrícula");
             assertThat(hdr.getCell(1).getStringCellValue()).isEqualTo("Jira");
-            assertThat(hdr.getCell(2).getStringCellValue()).isEqualTo("REAL");
+            assertThat(hdr.getCell(2).getStringCellValue()).isEqualTo("Facturar");
             assertThat(hdr.getCell(3).getStringCellValue()).isEqualTo("PDCL");
             assertThat(hdr.getCell(4).getStringCellValue()).isEqualTo("PDCL + Deuda");
         }
@@ -345,7 +345,7 @@ class SummarySheetBuilderTest {
     private static Workbook buildResultadoWorkbookWithResponsible() {
         Workbook wb = new XSSFWorkbook();
         Sheet res = wb.createSheet("Resultado");
-        writeRow(res, 0, "Petición", "Matrícula", "Jira", "REAL", "PDCL",
+        writeRow(res, 0, "Petición", "Matrícula", "Jira", "Facturar", "PDCL",
                 "PDCL + Deuda", "Res. Tecnico");
         writeRow(res, 1, "P-001", "99641", 5.0, 6.0, 7.0, 7.5, "RESP_A");
         writeRow(res, 2, "P-002", "99642", 3.0, 3.6, 4.0, 4.2, "RESP_B");
@@ -429,7 +429,7 @@ class SummarySheetBuilderTest {
         // colapsarlos en una sola columna "RESP01" (trim + toUpperCase).
         Workbook wb = new XSSFWorkbook();
         Sheet res = wb.createSheet("Resultado");
-        writeRow(res, 0, "Petición", "Matrícula", "Jira", "REAL", "PDCL",
+        writeRow(res, 0, "Petición", "Matrícula", "Jira", "Facturar", "PDCL",
                 "PDCL + Deuda", "Res. Tecnico");
         writeRow(res, 1, "P-001", "99641", 1.0, 1.2, 1.5, 1.5, "resp01");
         writeRow(res, 2, "P-002", "99641", 2.0, 2.4, 3.0, 3.0, "RESP01");
@@ -478,7 +478,7 @@ class SummarySheetBuilderTest {
 
             // Celda SUMIFS para (99641, RESP_A): columna 1.
             // En el workbook del test Resultado tiene columnas:
-            //   A=Peticion, B=Matricula, C=Jira, D=REAL, E=PDCL,
+            //   A=Peticion, B=Matricula, C=Jira, D=Facturar, E=PDCL,
             //   F=PDCL+Deuda, G=Res. Tecnico.
             // Por tanto valueLetter=E, matrLetter=B, respLetter=G.
             // SUMIFS con rangos acotados 2:10000 y criterio:
@@ -574,7 +574,7 @@ class SummarySheetBuilderTest {
         // los datos origen queda fuera del alcance de esta iteracion.
         Workbook wb = new XSSFWorkbook();
         Sheet res = wb.createSheet("Resultado");
-        writeRow(res, 0, "Petición", "Matrícula", "Jira", "REAL", "PDCL",
+        writeRow(res, 0, "Petición", "Matrícula", "Jira", "Facturar", "PDCL",
                 "PDCL + Deuda", "Res. Tecnico");
         writeRow(res, 1, "P-001", "99641", 1.0, 1.2, 1.5, 1.5, "resp01");
         writeRow(res, 2, "P-002", "99641", 2.0, 2.4, 3.0, 3.0, "RESP01");
@@ -620,7 +620,7 @@ class SummarySheetBuilderTest {
         // contrato.
         Workbook wb = new XSSFWorkbook();
         Sheet res = wb.createSheet("Resultado");
-        writeRow(res, 0, "Petición", "Matrícula", "Jira", "REAL", "PDCL",
+        writeRow(res, 0, "Petición", "Matrícula", "Jira", "Facturar", "PDCL",
                 "PDCL + Deuda", "Res. Tecnico");
         writeRow(res, 1, "P-001", "99641", 1.0, 1.2, 1.5, 1.5, "RESP01");
         writeRow(res, 2, "P-002", "99641", 4.0, 4.8, 6.0, 6.0, " Resp01 ");

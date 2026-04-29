@@ -459,7 +459,7 @@ class ExcelMergerIntegrationTest {
                 String pet = mes.getRow(r).getCell(0).getStringCellValue();
                 if (!"TICKETS".equals(pet)) continue;
                 // Columnas MES en test-config (v2.1.0 con Funcion en posicion 7):
-                //  0=Petición, 1=Aplicación, 2=Equipo, 3=Jira, 4=REAL,
+                //  0=Petición, 1=Aplicación, 2=Equipo, 3=Jira, 4=Facturar,
                 //  5=Matrícula, 6=Funcion, 7=Res. Tecnico, 8=PDCL, 9=PDCL + Deuda.
                 assertThat(mes.getRow(r).getCell(1).getStringCellValue()).isEqualTo("-");
                 assertThat(mes.getRow(r).getCell(7).getStringCellValue()).isEqualTo("-");
@@ -471,7 +471,7 @@ class ExcelMergerIntegrationTest {
 
     @Test
     void orphansEnabledColumnasFormulaCalculanJiraPor12(@TempDir Path tmp) throws IOException {
-        // REAL, PDCL, PDCL+Deuda son columnas FORMULA con plantilla *1.2
+        // Facturar, PDCL, PDCL+Deuda son columnas FORMULA con plantilla *1.2
         // (o referencia a PDCL). En huerfanos deben evaluar igual que en
         // filas normales: Jira*1.2 y la cascada.
         ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
@@ -487,8 +487,8 @@ class ExcelMergerIntegrationTest {
             for (int r = 1; r <= mes.getLastRowNum(); r++) {
                 String pet = mes.getRow(r).getCell(0).getStringCellValue();
                 if (!"TICKETS".equals(pet)) continue;
-                // Indices (v2.1.0 con Funcion en 6): 3=Jira, 4=REAL, 8=PDCL, 9=PDCL+Deuda.
-                // Jira=8.0, REAL=9.6, PDCL=9.6, PDCL+Deuda=9.6
+                // Indices (v2.1.0 con Funcion en 6): 3=Jira, 4=Facturar, 8=PDCL, 9=PDCL+Deuda.
+                // Jira=8.0, Facturar=9.6, PDCL=9.6, PDCL+Deuda=9.6
                 assertThat(mes.getRow(r).getCell(3).getNumericCellValue()).isEqualTo(8.0);
                 CellValue real = evaluator.evaluate(mes.getRow(r).getCell(4));
                 assertThat(real.getNumberValue()).isEqualTo(9.6);
@@ -637,7 +637,7 @@ class ExcelMergerIntegrationTest {
 
     @Test
     void mesColRealUsaFormulaConReferenciaAColumnaJira(@TempDir Path tmp) throws IOException {
-        // REAL es la columna 5 (index 4). Su plantilla es "{col:Jira}*1.2".
+        // Facturar es la columna 5 (index 4). Su plantilla es "{col:Jira}*1.2".
         // Jira es la columna 4 (index 3 -> letra D). Fila 2 de MES (primera de datos).
         // Por tanto la formula registrada debe ser exactamente "D2*1.2".
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
@@ -728,7 +728,7 @@ class ExcelMergerIntegrationTest {
             // Fila 3 (idx 2): cabeceras segun test-config
             assertThat(resumen.getRow(2).getCell(0).getStringCellValue()).isEqualTo("Matrícula");
             assertThat(resumen.getRow(2).getCell(1).getStringCellValue()).isEqualTo("Jira");
-            assertThat(resumen.getRow(2).getCell(2).getStringCellValue()).isEqualTo("REAL");
+            assertThat(resumen.getRow(2).getCell(2).getStringCellValue()).isEqualTo("Facturar");
             assertThat(resumen.getRow(2).getCell(3).getStringCellValue()).isEqualTo("PDCL");
             assertThat(resumen.getRow(2).getCell(4).getStringCellValue()).isEqualTo("PDCL + Deuda");
 
@@ -1249,7 +1249,7 @@ class ExcelMergerIntegrationTest {
             // "Total" que aparece desde arriba).
             int firstTotalRow0 = findRowByFirstCell(resumen, "Total");
             assertThat(firstTotalRow0).isGreaterThan(0);
-            // Primera tabla: columnas son Matricula, Jira, REAL, PDCL, PDCL+Deuda.
+            // Primera tabla: columnas son Matricula, Jira, Facturar, PDCL, PDCL+Deuda.
             // PDCL es cell(3).
             double pdclGlobalTabla1 = evaluator.evaluate(
                     resumen.getRow(firstTotalRow0).getCell(3)).getNumberValue();
@@ -1442,7 +1442,7 @@ class ExcelMergerIntegrationTest {
         // (antes col.9 -> ahora col.10, index 9). Las formulas deben seguir
         // evaluando correctamente post-desplazamiento. Usamos P-001, que en
         // el fixture tiene Jira=5.0 (PROJ-1 3h + PROJ-2 2h = 5h, filtrado
-        // Funcion=Dev deja fuera PROJ-3 Sup). Esperado: REAL=6.0, PDCL=6.0,
+        // Funcion=Dev deja fuera PROJ-3 Sup). Esperado: Facturar=6.0, PDCL=6.0,
         // PDCL+Deuda=6.0.
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
@@ -1458,7 +1458,7 @@ class ExcelMergerIntegrationTest {
             Row row = resultado.getRow(1);
             assertThat(row.getCell(0).getStringCellValue()).isEqualTo("P-001");
 
-            // Indices (v2.1.0): 3=Jira, 4=REAL, 5=Matrícula, 6=Funcion,
+            // Indices (v2.1.0): 3=Jira, 4=Facturar, 5=Matrícula, 6=Funcion,
             // 7=Res. Tecnico, 8=PDCL, 9=PDCL + Deuda.
             CellValue jira = evaluator.evaluate(row.getCell(3));
             assertThat(jira.getNumberValue())
@@ -1983,11 +1983,11 @@ class ExcelMergerIntegrationTest {
 
     /**
      * En modo {@code responsables}, cada hoja de responsable debe contener
-     * dos tablas pivot SUMIFS (Jira y REAL) apiladas verticalmente, ademas
+     * dos tablas pivot SUMIFS (Jira y Facturar) apiladas verticalmente, ademas
      * de la cabecera A1 (v2.3.0).
      *
      * <p>Verifica la estructura: titulo Jira, cabecera con matriculas,
-     * datos, totales, gap, titulo REAL, cabecera, datos, totales.</p>
+     * datos, totales, gap, titulo Facturar, cabecera, datos, totales.</p>
      */
     @Test
     void v240ResponsablesGeneraDosTablasPivotPorHoja(@TempDir Path tmp) throws IOException {
@@ -2013,21 +2013,21 @@ class ExcelMergerIntegrationTest {
             assertThat(sheet.getRow(3).getCell(0).getStringCellValue()).isEqualTo("Petición");
 
             // Hay una segunda tabla en algún punto más abajo cuyo título
-            // contiene "REAL". La buscamos sin asumir índice exacto.
-            int realTitleRow = -1;
+            // contiene "Facturar". La buscamos sin asumir índice exacto.
+            int facturarTitleRow = -1;
             for (int r = 4; r <= sheet.getLastRowNum(); r++) {
                 Row row = sheet.getRow(r);
                 if (row == null) continue;
                 Cell c0 = row.getCell(0);
                 if (c0 == null) continue;
                 if (c0.getCellType() == CellType.STRING
-                        && c0.getStringCellValue().contains("REAL")
+                        && c0.getStringCellValue().contains("Facturar")
                         && c0.getStringCellValue().contains("Petición")) {
-                    realTitleRow = r;
+                    facturarTitleRow = r;
                     break;
                 }
             }
-            assertThat(realTitleRow).as("titulo tabla REAL encontrado").isPositive();
+            assertThat(facturarTitleRow).as("titulo tabla Facturar encontrado").isPositive();
         }
     }
 
@@ -2040,7 +2040,7 @@ class ExcelMergerIntegrationTest {
      * con Horas_RealizadoTot=12. Es la única ocurrencia de esa combinación
      * para tresp1@x.</p>
      *
-     * <p>Como Jira y REAL en Resultado se calculan a partir de cruces, el
+     * <p>Como Jira y Facturar en Resultado se calculan a partir de cruces, el
      * valor exacto depende del fixture. Para no acoplarse a aritmética
      * exacta, este test verifica únicamente: (a) que el SUMIFS evalúa sin
      * error, (b) que el valor es no negativo, (c) que coincide con la
@@ -2182,24 +2182,24 @@ class ExcelMergerIntegrationTest {
             Sheet sheet = wb.getSheet("tresp1@x");
             assertThat(sheet).as("hoja tresp1@x").isNotNull();
 
-            // Verifica presencia de las dos pivots: titulo Jira y titulo REAL.
+            // Verifica presencia de las dos pivots: titulo Jira y titulo Facturar.
             String title1 = sheet.getRow(2).getCell(0).getStringCellValue();
             assertThat(title1).contains("Jira");
 
-            // Buscar el segundo titulo más abajo con "REAL"
-            boolean foundReal = false;
+            // Buscar el segundo titulo más abajo con "Facturar"
+            boolean foundFacturar = false;
             for (int r = 4; r <= sheet.getLastRowNum(); r++) {
                 Row row = sheet.getRow(r);
                 if (row == null) continue;
                 Cell c0 = row.getCell(0);
                 if (c0 == null || c0.getCellType() != CellType.STRING) continue;
-                if (c0.getStringCellValue().contains("REAL")
+                if (c0.getStringCellValue().contains("Facturar")
                         && c0.getStringCellValue().contains("Petición")) {
-                    foundReal = true;
+                    foundFacturar = true;
                     break;
                 }
             }
-            assertThat(foundReal).as("segunda tabla REAL en hoja de responsable").isTrue();
+            assertThat(foundFacturar).as("segunda tabla Facturar en hoja de responsable").isTrue();
         }
     }
 
@@ -2267,5 +2267,178 @@ class ExcelMergerIntegrationTest {
             assertThat(sheet.getLastRowNum()).as("solo cabecera A1, sin pivots").isZero();
             assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("tresp1@x");
         }
+    }
+
+    // ==================================================================
+    //  v2.6.0 — Modif 1: la columna Horas_RealizadoTot de Resultado
+    //           proviene de Cierre.Total_Horas_Realizadas_Recurso
+    //           (no de Cierre.Horas_RealizadoTot, fuente hasta v2.5.1).
+    // ==================================================================
+
+    /**
+     * v2.6.0 (Modif 1): verifica que la columna {@code Horas_RealizadoTot} de
+     * Resultado contiene los valores de {@code Cierre.Total_Horas_Realizadas_Recurso}
+     * y NO los de {@code Cierre.Horas_RealizadoTot}.
+     *
+     * <p>El fixture {@code cierre.xlsx} tiene valores diferenciables en ambas
+     * columnas (p. ej. P-001: Horas_RealizadoTot=12 vs
+     * Total_Horas_Realizadas_Recurso=20; P-002: 30 vs 35; etc.). El test
+     * comprueba que en Resultado aparece el valor de la columna
+     * <i>Total_Horas_Realizadas_Recurso</i>, lo que solo es posible si el
+     * config aplica {@code mes.col.N.from=Total_Horas_Realizadas_Recurso}.</p>
+     */
+    @Test
+    void v260HorasRealizadoTotProvieneDeTotalHorasRealizadasRecurso(@TempDir Path tmp)
+            throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resultado = wb.getSheet("Resultado");
+            assertThat(resultado).as("hoja Resultado").isNotNull();
+
+            int colPet = findHeaderIndex(resultado, "Petición");
+            int colHRT = findHeaderIndex(resultado, "Horas_RealizadoTot");
+            assertThat(colPet).as("col Petición").isNotNegative();
+            assertThat(colHRT).as("col Horas_RealizadoTot").isNotNegative();
+
+            // Mapeo Peticion -> valor esperado tomado de la columna
+            // Total_Horas_Realizadas_Recurso del fixture cierre.xlsx
+            // (NO de Horas_RealizadoTot, que es la fuente vieja).
+            // Datos del fixture (ver gen_fixtures.py):
+            //   P-001: HRT=12  THRR=20   <- esperamos 20 (Modif 1)
+            //   P-002: HRT=30  THRR=35   <- esperamos 35
+            //   P-007: HRT=40  THRR=60   <- esperamos 60
+            // Valores que descartarian la fuente vieja: 12, 30, 40 NO deben aparecer.
+            java.util.Map<String, Double> esperados = new java.util.HashMap<>();
+            esperados.put("P-001", 20.0);
+            esperados.put("P-002", 35.0);
+            esperados.put("P-007", 60.0);
+
+            int comprobadas = 0;
+            for (int r = 1; r <= resultado.getLastRowNum(); r++) {
+                Row row = resultado.getRow(r);
+                if (row == null) continue;
+                Cell pc = row.getCell(colPet);
+                if (pc == null || pc.getCellType() != CellType.STRING) continue;
+                String pet = pc.getStringCellValue();
+                Double exp = esperados.get(pet);
+                if (exp == null) continue;
+                Cell hrtCell = row.getCell(colHRT);
+                assertThat(hrtCell).as("celda Horas_RealizadoTot fila " + pet).isNotNull();
+                double actual = readNumericOrParse(hrtCell);
+                assertThat(actual)
+                        .as("Horas_RealizadoTot[" + pet + "] debe venir de "
+                                + "Total_Horas_Realizadas_Recurso (Modif 1 v2.6.0), "
+                                + "no de Horas_RealizadoTot (fuente vieja).")
+                        .isEqualTo(exp);
+                comprobadas++;
+            }
+            assertThat(comprobadas)
+                    .as("se han verificado las 3 peticiones del fixture P-001/P-002/P-007")
+                    .isEqualTo(3);
+        }
+    }
+
+    // ==================================================================
+    //  v2.6.0 — Modif 2: la columna Realizadas_Horas_Mes copia tal cual
+    //           desde Cierre, sea cero o no.
+    // ==================================================================
+
+    /**
+     * v2.6.0 (Modif 2): el diagnóstico de v2.6.0 concluyó que NO hay bug en
+     * {@code CopyColumnStrategy}: la columna {@code Realizadas_Horas_Mes} sale
+     * toda a 0 en el output del usuario porque su ERP rellena esa columna con
+     * "0.00" en el 100% de las 832 filas del export real. Es realidad del ERP,
+     * no bug del programa.
+     *
+     * <p>Este test ancla el contrato: la columna de Resultado debe coincidir
+     * celda a celda con la columna correspondiente de Cierre, sea el valor
+     * cero o no. El fixture sintético tiene ambos casos (P-001=5, P-003=0,
+     * P-002=15, etc.).</p>
+     */
+    @Test
+    void v260RealizadasHorasMesCopiaTalCualDesdeCierre(@TempDir Path tmp)
+            throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet resultado = wb.getSheet("Resultado");
+            assertThat(resultado).as("hoja Resultado").isNotNull();
+
+            int colPet = findHeaderIndex(resultado, "Petición");
+            int colRHM = findHeaderIndex(resultado, "Realizadas_Horas_Mes");
+            assertThat(colPet).as("col Petición").isNotNegative();
+            assertThat(colRHM).as("col Realizadas_Horas_Mes").isNotNegative();
+
+            // Datos del fixture cierre.xlsx (ver gen_fixtures.py):
+            //   P-001 -> 5    (no-cero, comprueba que el COPY trae el valor)
+            //   P-002 -> 15   (no-cero)
+            //   P-003 -> 0    (cero legítimo, comprueba que tambien se copia)
+            //   P-008 -> 0    (cero legítimo)
+            //   P-007 -> 15
+            // El test comprueba ambos casos (no-cero y cero) para confirmar
+            // que CopyColumnStrategy hace exactamente lo que debe.
+            java.util.Map<String, Double> esperados = new java.util.HashMap<>();
+            esperados.put("P-001", 5.0);
+            esperados.put("P-002", 15.0);
+            esperados.put("P-003", 0.0);
+            esperados.put("P-007", 15.0);
+            esperados.put("P-008", 0.0);
+
+            int comprobadas = 0;
+            for (int r = 1; r <= resultado.getLastRowNum(); r++) {
+                Row row = resultado.getRow(r);
+                if (row == null) continue;
+                Cell pc = row.getCell(colPet);
+                if (pc == null || pc.getCellType() != CellType.STRING) continue;
+                String pet = pc.getStringCellValue();
+                Double exp = esperados.get(pet);
+                if (exp == null) continue;
+                Cell rhmCell = row.getCell(colRHM);
+                assertThat(rhmCell).as("celda Realizadas_Horas_Mes fila " + pet).isNotNull();
+                double actual = readNumericOrParse(rhmCell);
+                assertThat(actual)
+                        .as("Realizadas_Horas_Mes[" + pet + "] debe copiarse tal cual desde "
+                                + "Cierre.Realizadas_Horas_Mes (sea cero o no).")
+                        .isEqualTo(exp);
+                comprobadas++;
+            }
+            assertThat(comprobadas)
+                    .as("se han verificado las 5 peticiones del fixture")
+                    .isEqualTo(5);
+        }
+    }
+
+    /**
+     * Helper local: devuelve el valor numérico de una celda. Acepta tanto
+     * {@code NUMERIC} (caso natural) como {@code STRING} con un literal
+     * parseable como double (caso ERP real, donde valores numéricos vienen
+     * formateados como "12.00" en sharedStrings).
+     */
+    private static double readNumericOrParse(Cell cell) {
+        if (cell == null) return Double.NaN;
+        if (cell.getCellType() == CellType.NUMERIC) {
+            return cell.getNumericCellValue();
+        }
+        if (cell.getCellType() == CellType.STRING) {
+            String s = cell.getStringCellValue().trim();
+            return Double.parseDouble(s);
+        }
+        if (cell.getCellType() == CellType.FORMULA) {
+            // El cache de la fórmula puede tener el valor evaluado (lección 1.7.1):
+            // si hay un FormulaEvaluator disponible, esto se evaluaría primero.
+            // Aquí sólo apoyamos el cache. Las columnas COPY no son FORMULA, así
+            // que esta rama es defensiva.
+            return cell.getNumericCellValue();
+        }
+        return Double.NaN;
     }
 }

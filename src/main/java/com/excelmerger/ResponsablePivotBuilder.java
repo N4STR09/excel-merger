@@ -16,7 +16,7 @@ import java.util.List;
 /**
  * v2.4.0 — Helper que escribe UNA tabla pivot SUMIFS Petición × Matrícula
  * en una hoja de responsable. Se invoca dos veces por hoja: una para Jira,
- * otra para REAL.
+ * otra para Facturar.
  *
  * <p>La tabla pivot tiene esta forma (los rangos son ilustrativos):</p>
  * <pre>
@@ -30,7 +30,7 @@ import java.util.List;
  * <p><b>Forma de las fórmulas SUMIFS</b> (3 criterios):</p>
  * <pre>
  *   SUMIFS(
- *     Resultado!&lt;valLetter&gt;2:&lt;valLetter&gt;maxRow,    // sum_range (Jira o REAL)
+ *     Resultado!&lt;valLetter&gt;2:&lt;valLetter&gt;maxRow,    // sum_range (Jira o Facturar)
  *     Resultado!&lt;peticionLetter&gt;2:&lt;peticionLetter&gt;maxRow,  $A&lt;dataRow&gt;,
  *     Resultado!&lt;matrLetter&gt;2:&lt;matrLetter&gt;maxRow,           &lt;matrColLetter&gt;$&lt;headerRow&gt;,
  *     Resultado!&lt;respLetter&gt;2:&lt;respLetter&gt;maxRow,           $A$1
@@ -82,7 +82,7 @@ final class ResponsablePivotBuilder {
         final String matriculaLetter;
         /** Letra Excel de la columna Res. Tecnico en la hoja origen. */
         final String responsableLetter;
-        /** Letra Excel de la columna sumada (Jira o REAL). */
+        /** Letra Excel de la columna sumada (Jira o Facturar). */
         final String valueLetter;
         /** Título visible de la tabla (fila merged). */
         final String title;

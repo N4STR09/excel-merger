@@ -41,7 +41,7 @@ class SummaryConfigSectionTest {
         p.setProperty("summary.sheetName", "Resumen");
         p.setProperty("summary.sumSheet", "Resultado");
         p.setProperty("summary.matriculaColumn", "Matricula");
-        p.setProperty("summary.valueColumns", "Horas,REAL");
+        p.setProperty("summary.valueColumns", "Horas,Facturar");
         return p;
     }
 

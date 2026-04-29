@@ -653,7 +653,7 @@ public class MesSheetBuilder {
         }
         if (col instanceof FormulaColumnStrategy
                 || col instanceof FormulaPlusSumIfsColumnStrategy) {
-            // Para columnas FORMULA y FORMULA_PLUS_SUMIFS (REAL, PDCL,
+            // Para columnas FORMULA y FORMULA_PLUS_SUMIFS (Facturar, PDCL,
             // PDCL+Deuda, Equipo) dejamos que la estrategia resuelva la
             // formula normalmente: {col:Jira}*1.2 se convertira en p.ej.
             // "D16*1.2" que referencia la celda Jira de esta misma fila

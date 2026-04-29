@@ -239,7 +239,7 @@ La celda `A1` contiene el **nombre canónico del responsable** (con estilo títu
 Por defecto cada hoja de responsable contiene, debajo de `A1`, **dos tablas pivot SUMIFS** apiladas verticalmente:
 
 1. **Horas imputadas (Jira) por Petición × Matrícula.**
-2. **REAL por Petición × Matrícula.**
+2. **Facturar por Petición × Matrícula.**
 
 Las tablas son fórmulas vivas contra `Resultado`, filtradas por el responsable cuyo nombre figura en `A1`. Las peticiones y matrículas que aparecen son únicamente las que ese responsable tiene en `Resultado` (no todas las del libro), por consistencia con la Tabla 2 de Resumen.
 
@@ -254,9 +254,9 @@ Excel row     Contenido (con responsable de 2 peticiones × 2 matrículas)
 6             P-002     | =SUMIFS | =SUMIFS | =SUM(B6:C6)
 7             Total     | =SUM    | =SUM    | =SUM(D5:D6)
 8, 9          — gap (configurable, default 2 filas) —
-10            [merged] REAL por Petición × Matrícula
+10            [merged] Facturar por Petición × Matrícula
 11            Petición  | M-1001  | M-1002  | Total
-12, 13, 14    … (idéntica estructura, columna REAL)
+12, 13, 14    … (idéntica estructura, columna Facturar)
 ```
 
 Las pivots se controlan con cuatro claves nuevas en `config.properties`:
@@ -267,7 +267,7 @@ responsables.tables.enabled=true
 
 # Títulos (literal en la fila merged).
 responsables.tables.jiraTitle=Horas imputadas (Jira) por Petición × Matrícula
-responsables.tables.realTitle=REAL por Petición × Matrícula
+responsables.tables.facturarTitle=Facturar por Petición × Matrícula
 
 # Filas en blanco entre las dos tablas. Admite 0. Default 2.
 responsables.tables.gapRows=2
@@ -438,7 +438,7 @@ mes.col.10.from=Extraccion
 mes.col.10.sum=Hours
 mes.col.10.match=Component Name:Peticion,Matricula:Recurso,Funcion:Funcion
 
-mes.col.11.name=REAL
+mes.col.11.name=Facturar
 mes.col.11.type=FORMULA
 mes.col.11.formula={col:Jira}*1.2
 
@@ -509,7 +509,7 @@ summary.matriculaColumn=Matrícula
 # Columnas cuyos valores se suman por matrícula (CSV).
 # Los nombres deben coincidir con mes.col.N.name. Las columnas no
 # encontradas se omiten con un warning, sin abortar la generación.
-summary.valueColumns=Jira,REAL,PDCL,PDCL + Deuda
+summary.valueColumns=Jira,Facturar,PDCL,PDCL + Deuda
 
 # Tope de fila para los rangos SUMIFS. El cuaderno original usa columnas
 # completas (I:I); aquí se acota para que POI pueda evaluarlas en tests.

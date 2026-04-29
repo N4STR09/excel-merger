@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * tablas pivot por hoja de responsable.
  *
  * <p>Construye una hoja {@code Resultado} con cabeceras realistas
- * (Petición, Matrícula, Res. Tecnico, Jira, REAL) y filas de datos
+ * (Petición, Matrícula, Res. Tecnico, Jira, Facturar) y filas de datos
  * conocidas, y verifica:</p>
  * <ul>
  *   <li>Con {@code responsables.tables.enabled=true} (default), cada
@@ -43,7 +43,7 @@ class ResponsablesSheetBuilderV24Test {
         h.createCell(1).setCellValue("Matrícula");
         h.createCell(2).setCellValue("Res. Tecnico");
         h.createCell(3).setCellValue("Jira");
-        h.createCell(4).setCellValue("REAL");
+        h.createCell(4).setCellValue("Facturar");
     }
 
     private void addRow(Sheet sheet, String peticion, String matricula,
@@ -64,13 +64,13 @@ class ResponsablesSheetBuilderV24Test {
      *
      * <pre>
      * tresp1@x:
-     *   P-001 / M-1001 -> Jira=5  REAL=6
-     *   P-001 / M-1002 -> Jira=2  REAL=2.4
-     *   P-002 / M-1001 -> Jira=10 REAL=12
-     *   P-002 / M-1001 -> Jira=3  REAL=3.6  (segunda imputacion misma combinacion)
+     *   P-001 / M-1001 -> Jira=5  Facturar=6
+     *   P-001 / M-1002 -> Jira=2  Facturar=2.4
+     *   P-002 / M-1001 -> Jira=10 Facturar=12
+     *   P-002 / M-1001 -> Jira=3  Facturar=3.6  (segunda imputacion misma combinacion)
      * tresp2@x:
-     *   P-003 / M-1003 -> Jira=7  REAL=8.4
-     *   P-004 / M-1003 -> Jira=4  REAL=4.8
+     *   P-003 / M-1003 -> Jira=7  Facturar=8.4
+     *   P-004 / M-1003 -> Jira=4  Facturar=4.8
      * </pre>
      *
      * <p>Esperados (tresp1@x, tabla Jira):</p>
@@ -151,12 +151,12 @@ class ResponsablesSheetBuilderV24Test {
             //   row 5 (Excel 6):  P-002
             //   row 6 (Excel 7):  Total
             //   row 7-8         : gap (2 filas en blanco)
-            //   row 9 (Excel 10): título REAL
-            //   row 10..14      : cabecera+datos+total REAL
+            //   row 9 (Excel 10): título Facturar
+            //   row 10..14      : cabecera+datos+total Facturar
 
             // Title de la segunda tabla con gap=2: row = 6 + 1 + 2 = 9
             String t2 = sheet.getRow(9).getCell(0).getStringCellValue();
-            assertThat(t2).contains("REAL");
+            assertThat(t2).contains("Facturar");
 
             // Fila cabecera (row 10): Petición + matrículas + Total
             Row hdr2 = sheet.getRow(10);
@@ -216,21 +216,21 @@ class ResponsablesSheetBuilderV24Test {
             Sheet sheet = wb.getSheet("tresp1@x");
             FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
 
-            // Tabla REAL: con gap=2, empieza en row 9 (título), 10 (cabecera),
+            // Tabla Facturar: con gap=2, empieza en row 9 (título), 10 (cabecera),
             // 11 (P-001), 12 (P-002), 13 (Total). Cuatro filas de datos -> 13 = total.
             // P-001/M-1001 = 6
             assertThat(ev.evaluate(sheet.getRow(11).getCell(1)).getNumberValue())
-                    .as("REAL P-001 x M-1001").isEqualTo(6.0);
+                    .as("Facturar P-001 x M-1001").isEqualTo(6.0);
             // P-001/M-1002 = 2.4
             assertThat(ev.evaluate(sheet.getRow(11).getCell(2)).getNumberValue())
-                    .as("REAL P-001 x M-1002").isEqualTo(2.4);
+                    .as("Facturar P-001 x M-1002").isEqualTo(2.4);
             // P-002/M-1001 = 12 + 3.6 = 15.6
             assertThat(ev.evaluate(sheet.getRow(12).getCell(1)).getNumberValue())
-                    .as("REAL P-002 x M-1001").isEqualTo(15.6);
+                    .as("Facturar P-002 x M-1001").isEqualTo(15.6);
 
             // Gran total = 6 + 2.4 + 15.6 + 0 = 24
             assertThat(ev.evaluate(sheet.getRow(13).getCell(3)).getNumberValue())
-                    .as("Gran total REAL").isEqualTo(24.0);
+                    .as("Gran total Facturar").isEqualTo(24.0);
         }
     }
 
@@ -339,7 +339,7 @@ class ResponsablesSheetBuilderV24Test {
             h.createCell(0).setCellValue("Petición");
             h.createCell(1).setCellValue("Matrícula");
             h.createCell(2).setCellValue("Res. Tecnico");
-            // SIN Jira/REAL
+            // SIN Jira/Facturar
             Row r1 = res.createRow(1);
             r1.createCell(0).setCellValue("P-001");
             r1.createCell(1).setCellValue("M-1001");

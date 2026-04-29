@@ -1,5 +1,119 @@
 # Changelog
 
+## [2.6.0] — Rename REAL→Facturar, fuente nueva en `Horas_RealizadoTot`, diagnóstico de columna 0
+
+Release minor. **Hay cambios visibles en el output y en `config.properties`** que requieren acción del usuario al actualizar; ver "Migración" más abajo. La compatibilidad de `config.properties` se rompe a propósito en dos claves cosméticas; los reportes Excel generados quedan funcionalmente equivalentes salvo por el nombre de cabecera renombrado y la nueva fuente de una columna.
+
+Tres modificaciones independientes:
+
+1. **Modif 1** — La columna `Horas_RealizadoTot` de `Resultado` ahora copia desde `Cierre.Total_Horas_Realizadas_Recurso` (horas realizadas por el recurso) en lugar de `Cierre.Horas_RealizadoTot` (horas totales de la petición). Es un cambio de fuente; el nombre de cabecera visible en el output no cambia.
+2. **Modif 2** — Se diagnostica el reporte del usuario "la columna `Realizadas_Horas_Mes` sale toda a 0 en el output". **No hay bug en el programa**: el ERP rellena esa columna con `"0.00"` en el 100% de las filas del export real (832/832 verificadas). `CopyColumnStrategy` opera correctamente. Se añade test de comportamiento que ancla este contrato y se documenta el resultado.
+3. **Modif 3** — La columna `REAL` de `Resultado` se renombra a `Facturar`. Cambio cosmético propagado a todas las referencias del proyecto (config, código, tests, README); no hay alias retrocompatibles.
+
+### Cambiado
+
+**Modif 1 — fuente de `mes.col.14.from`.** En los dos `config.properties` (raíz y `src/main/resources/`) la línea pasa de `mes.col.14.from=Horas_RealizadoTot` a `mes.col.14.from=Total_Horas_Realizadas_Recurso`. La cabecera generada en `Resultado` sigue llamándose `Horas_RealizadoTot` (ese era el nombre en uso); solo cambia su origen. La columna ya estaba listada en `profile.Cierre.detect.headers` desde 2.0.0, así que el perfil no se toca. El cambio es config-only — `CopyColumnStrategy` no necesita modificaciones.
+
+Nota sobre la confusión: en el perfil Cierre coexisten dos columnas similares — `Total_Horas_Autorizadas_Recurso` (autorizadas) y `Total_Horas_Realizadas_Recurso` (realizadas). La correcta para esta semántica ("lo que el recurso ha hecho de verdad") es la segunda, no la primera.
+
+**Modif 3 — REAL → Facturar.** El nombre cosmético de la columna calculada `{col:Jira}*1.2` se renombra. Lugares afectados:
+
+- `mes.col.11.name=REAL` → `mes.col.11.name=Facturar` en los tres `config.properties` (raíz, fallback, test).
+- `summary.valueColumns=Jira,REAL,PDCL,PDCL + Deuda` → `Jira,Facturar,PDCL,PDCL + Deuda` en los tres configs.
+- Clave `responsables.tables.realTitle` → `responsables.tables.facturarTitle` (rename completo, no alias). El valor por defecto pasa a `Facturar por Petición × Matrícula`.
+- En código main: `ResponsablesSheetBuilder.COL_REAL` → `COL_FACTURAR`, `DEFAULT_REAL_TITLE` → `DEFAULT_FACTURAR_TITLE`, campo `ColumnLetters.real` → `ColumnLetters.facturar`. `SummarySheetBuilder.DEFAULT_VALUE_COLUMNS` actualizado.
+- En tests: `ResponsablesSheetBuilderV24Test`, `ResponsablePivotBuilderTest`, `SummarySheetBuilderTest`, `ExcelMergerIntegrationTest`, `ConfigValidatorTest`, `MainTest`, `SummaryConfigSectionTest` — todas las apariciones del literal `"REAL"` y de la clave `realTitle` actualizadas.
+- README actualizado en las 6 ubicaciones que mencionaban la columna o la clave.
+
+**Casos NO renombrados (mantenidos a propósito):**
+- `MesSheetBuilderTest.placeholderColDistingueEntreRealYREAL` y `MesSheetBuilderTest.placeholderColNoMatcheaPorCasePermisivo` siguen usando los literales `"Real"` y `"REAL"` porque son tests sobre el mecanismo case-sensitive del placeholder `{col:X}` (CHANGELOG 1.3.0, "Decisiones conservadas"); el caso `Real` vs `REAL` es el ejemplo abstracto de la propiedad y no se refiere a la columna funcional.
+- Comentarios `// (p. ej. "Real" vs "REAL")` en `MesSheetBuilder.java:145` y `FormulaColumnStrategy.java:20` mantienen el ejemplo del mecanismo case-sensitive por la misma razón.
+- Referencias históricas en este CHANGELOG (entradas anteriores a 2.6.0) son inmutables.
+
+### Investigado
+
+**Modif 2 — la columna `Realizadas_Horas_Mes` sale toda a 0 en el output real del usuario.** Reportado como posible bug. Diagnóstico antes de tocar código:
+
+Se inspeccionó el input real `EXCEL_CIERRE.xlsx` (832 filas de datos):
+
+- La cabecera del ERP se llama exactamente `Realizadas_Horas_Mes`. Sin typos, sin espacios, sin caracteres no imprimibles. **Hipótesis "mismatch de nombre" descartada.**
+- Las celdas de esa columna son de tipo `STRING` (`t="s"` en el XML OOXML, apuntando a `sharedStrings`) con valor `"0.00"`. **Cero fórmulas** en la columna. **Hipótesis "FORMULA mal copiada por `PoiUtils.copyCellValue`" descartada para este input.**
+- Conteo de valores únicos en las 832 filas: **un único valor — `"0.00"`** (832/832).
+- Comparación con columnas vecinas: `UltimaPrevision_Horas_Mes` tiene 35 valores únicos (mayormente 0 pero con datos reales); `Total_Horas_Realizadas_Recurso` tiene 207 valores únicos con datos ricos. Solo `Realizadas_Horas_Mes` está homogéneamente vacía.
+
+**Conclusión: el ERP del usuario simplemente no rellena esa columna en este export.** `CopyColumnStrategy` opera correctamente: copia el valor textual `"0.00"` desde el origen al destino. **No hay bug; es realidad del export ERP.**
+
+Decisión: no se toca código. Se añade un test de comportamiento que ancla el contrato (`v260RealizadasHorasMesCopiaTalCualDesdeCierre`) verificando que el COPY traslada celda a celda los valores del fixture sintético, incluidos tanto valores no-cero (5, 15) como ceros legítimos (0, 0).
+
+**Riesgo latente detectado, NO corregido:** `PoiUtils.copyCellValue` en su rama `case FORMULA` (líneas 72-74) copia solo la fórmula sin valor cacheado. Si en el futuro algún input ERP llega con la columna `Realizadas_Horas_Mes` como tipo `FORMULA`, y nadie hace `evaluateAll` antes de guardar, Excel podría mostrar 0 hasta que el usuario abra y recalcule. **No es la causa actual** y no se modifica para no introducir regresiones cosméticas en otros flujos. Documentado aquí para que el siguiente que toque esa rama tenga el contexto.
+
+### Tests
+
+Tres tests nuevos en `ExcelMergerIntegrationTest`:
+
+- `v260HorasRealizadoTotProvieneDeTotalHorasRealizadasRecurso` (Modif 1) — verifica que para P-001/P-002/P-007 la columna `Resultado.Horas_RealizadoTot` contiene los valores 20/35/60 (de `Total_Horas_Realizadas_Recurso`) y NO los valores 12/30/40 (de la fuente vieja `Horas_RealizadoTot`).
+- `v260RealizadasHorasMesCopiaTalCualDesdeCierre` (Modif 2) — verifica que para 5 peticiones del fixture la columna `Resultado.Realizadas_Horas_Mes` coincide con `Cierre.Realizadas_Horas_Mes` celda a celda, incluyendo valores no-cero (P-001=5, P-002=15, P-007=15) y ceros legítimos (P-003=0, P-008=0).
+
+Para que estos tests sean ejecutables, se han añadido dos columnas al `test-config.properties`:
+
+```properties
+mes.col.11.name=Horas_RealizadoTot
+mes.col.11.type=COPY
+mes.col.11.from=Total_Horas_Realizadas_Recurso
+
+mes.col.12.name=Realizadas_Horas_Mes
+mes.col.12.type=COPY
+mes.col.12.from=Realizadas_Horas_Mes
+```
+
+Hasta v2.5.1 el test-config solo definía 10 columnas (Petición..PDCL+Deuda) y no ejercitaba ninguna de las dos columnas COPY que sí están en el config principal. La ampliación es retrocompatible con los tests existentes — no hay asserts sobre el número exacto de columnas de `Resultado` ni sobre índices >= 10 en esa hoja. (El test `cierreColumnsCorrectasTrasAsTextEnRecursoNumerico` que usa `getCell(11)` opera sobre la hoja `Cierre` —que tiene 17 columnas—, no sobre `Resultado`.)
+
+Tests modificados en Modif 3: todos los asserts y setups de cabeceras que comparaban literal `"REAL"` ahora comparan `"Facturar"`. La clave `responsables.tables.realTitle` se renombra a `facturarTitle` en `ConfigValidatorTest.responsablesTablesFacturarTitleVacioDevuelveError` (antes `responsablesTablesRealTitleVacioDevuelveError`). El test `summary.valueColumns=Horas,REAL` de `SummaryConfigSectionTest` pasa a `Horas,Facturar` por coherencia (no afectaba al test, era literal arbitrario).
+
+Total esperado: 273 tests anteriores (varios modificados por Modif 3, ninguno eliminado) + 2 tests nuevos (Modif 1 + Modif 2) = 275 tests.
+
+### Migración
+
+Si actualizas desde v2.5.x, edita tu `config.properties` antes de ejecutar:
+
+1. **Renombra `mes.col.11.name`:**
+   ```diff
+   - mes.col.11.name=REAL
+   + mes.col.11.name=Facturar
+   ```
+   No hay alias retrocompatible. Un config con la línea vieja seguirá produciendo una columna llamada `REAL` en el output (porque `mes.col.N.name` es el nombre visible directamente), pero `summary.valueColumns` y las pivots por responsable buscarán `Facturar` y emitirán un warning por columna no encontrada. Resultado: la hoja Resumen y las pivots dejarán de incluir esa columna hasta que se ajuste el nombre.
+
+2. **Renombra `summary.valueColumns`:**
+   ```diff
+   - summary.valueColumns=Jira,REAL,PDCL,PDCL + Deuda
+   + summary.valueColumns=Jira,Facturar,PDCL,PDCL + Deuda
+   ```
+
+3. **Renombra la clave `responsables.tables.realTitle`:**
+   ```diff
+   - responsables.tables.realTitle=REAL por Petición × Matrícula
+   + responsables.tables.facturarTitle=Facturar por Petición × Matrícula
+   ```
+   Si dejas la clave vieja `realTitle`, el código no la lee y aplica el default nuevo (`Facturar por Petición × Matrícula`), así que la pivot mostrará el título correcto pero tu personalización (si la tenías) se ignora. Renombra la clave para mantenerla activa.
+
+4. **Cambia `mes.col.14.from`:**
+   ```diff
+     mes.col.14.name=Horas_RealizadoTot
+     mes.col.14.type=COPY
+   - mes.col.14.from=Horas_RealizadoTot
+   + mes.col.14.from=Total_Horas_Realizadas_Recurso
+   ```
+   Tras este cambio, la columna `Horas_RealizadoTot` del output contendrá los valores de la columna `Total_Horas_Realizadas_Recurso` de `Cierre`. El nombre de cabecera no cambia.
+
+Si tu deployment ya monta sobre el `config.properties` empaquetado (fallback en `src/main/resources/`) sin override externo, el upgrade del binario aplica las cuatro modificaciones automáticamente.
+
+### Sin cambios
+
+- Build endurecida (wrapper, Spotless, SpotBugs Medium, PMD, Checkstyle, git-commit-id) tal cual estaba en v2.5.1.
+- Cobertura ≥70% mantenida (los tests nuevos suben ligeramente la cobertura del paquete `sheet.column` y `MesSheetBuilder`; ningún paquete baja).
+- API pública, CLI, códigos de salida, formato de log idénticos a v2.5.1.
+- Todas las features de v2.5.1 (huérfanos, perfil Deuda, modos de output, tablas pivot por responsable, segunda tabla de Resumen) intactas.
+
 ## [2.5.1] — Cobertura del paquete `com.excelmerger.io` (+ fix detección de locks en Windows ES)
 
 Release patch. **El contrato externo es idéntico al de v2.5.0**: misma CLI, mismo `config.properties`, mismo output, mismos códigos de salida, misma API pública. Si tu deployment usa v2.5.0, este binario lo sustituye sin requerir cambios.

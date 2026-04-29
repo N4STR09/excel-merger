@@ -26,7 +26,7 @@ import java.util.Set;
 
 /**
  * Construye la hoja "Resumen" (v1.6.0): sumatorio por matrícula de las
- * columnas numéricas de {@code Resultado} (Jira, REAL, PDCL, PDCL + Deuda
+ * columnas numéricas de {@code Resultado} (Jira, Facturar, PDCL, PDCL + Deuda
  * por defecto).
  *
  * <p>Estructura de la hoja generada (tabla 1, por matrícula):</p>
@@ -67,7 +67,7 @@ public class SummarySheetBuilder {
     /** Nombre por defecto de la columna clave en Resultado. */
     private static final String DEFAULT_MATRICULA_COLUMN = "Matrícula";
     /** Columnas agregadas por defecto. */
-    private static final String DEFAULT_VALUE_COLUMNS = "Jira,REAL,PDCL,PDCL + Deuda";
+    private static final String DEFAULT_VALUE_COLUMNS = "Jira,Facturar,PDCL,PDCL + Deuda";
     /** Nombre de la hoja origen por defecto. */
     private static final String DEFAULT_SUM_SHEET = "Resultado";
     /** Nombre de la hoja generada por defecto. */

@@ -697,11 +697,11 @@ class ConfigValidatorTest {
     }
 
     @Test
-    void responsablesTablesRealTitleVacioDevuelveError() {
+    void responsablesTablesFacturarTitleVacioDevuelveError() {
         Properties p = minimalValid();
-        p.setProperty("responsables.tables.realTitle", "");
+        p.setProperty("responsables.tables.facturarTitle", "");
         assertThat(validatorFor(p).validate())
-                .anyMatch(s -> s.contains("responsables.tables.realTitle")
+                .anyMatch(s -> s.contains("responsables.tables.facturarTitle")
                         && s.contains("no puede estar vacio"));
     }
 

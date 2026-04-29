@@ -44,7 +44,7 @@ public final class Main {
 
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final String APP_NAME = "Excel Merger";
-    static final String APP_VERSION = "2.5.1";
+    static final String APP_VERSION = "2.6.0";
     private static final String GIT_PROPERTIES_PATH = "/git.properties";
     /** Separador visual usado en los banners del log. */
     private static final String BANNER_SEPARATOR = "====================================";

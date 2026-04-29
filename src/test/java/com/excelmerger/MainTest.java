@@ -101,7 +101,7 @@ class MainTest {
         //        y la copia del input Deuda. Ver CHANGELOG [2.3.0].
         // 2.4.0: tablas pivot Peticion x Matricula en cada hoja de
         //        responsable (modos responsables y completo). Dos tablas
-        //        SUMIFS (Jira y REAL) filtradas por A1, opt-out via
+        //        SUMIFS (Jira y Facturar) filtradas por A1, opt-out via
         //        responsables.tables.enabled=false. Nuevo helper
         //        ResponsablePivotBuilder. Ver CHANGELOG [2.4.0].
         // 2.5.0: refactor estructural de ConfigValidator (Sesion F.1).
@@ -125,6 +125,16 @@ class MainTest {
         //        espanol ("otro proceso tiene bloqueada", "el proceso no
         //        tiene acceso") en FileLockDetector.looksLikeLocked.
         //        Ver CHANGELOG [2.5.1].
-        assertThat(Main.APP_VERSION).isEqualTo("2.5.1");
+        // 2.6.0: rename cosmetico REAL -> Facturar en el nombre de la
+        //        columna calculada (mes.col.11.name), propagado a todos los
+        //        sitios (config.properties, summary.valueColumns,
+        //        responsables.tables.realTitle -> facturarTitle, codigo,
+        //        tests, README). Cambio de fuente de mes.col.14: ahora
+        //        Horas_RealizadoTot copia desde Total_Horas_Realizadas_Recurso
+        //        (Modif 1). Diagnostico de "Realizadas_Horas_Mes a 0" como
+        //        realidad del ERP, no bug del programa (Modif 2). Sin alias
+        //        retrocompatibles: configs antiguos requieren actualizacion
+        //        manual (ver seccion Migracion en CHANGELOG [2.6.0]).
+        assertThat(Main.APP_VERSION).isEqualTo("2.6.0");
     }
 }

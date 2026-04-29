@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Las columnas en Resultado se montan idénticas a las que produce
  * {@code MesSheetBuilder} en producción (orden y nombres):
- * Petición(A), Matrícula(B), Res. Tecnico(C), Jira(D), REAL(E).</p>
+ * Petición(A), Matrícula(B), Res. Tecnico(C), Jira(D), Facturar(E).</p>
  */
 class ResponsablePivotBuilderTest {
 
@@ -37,7 +37,7 @@ class ResponsablePivotBuilderTest {
     private static final String LETTER_MATRICULA = "B";
     private static final String LETTER_RESPONSABLE = "C";
     private static final String LETTER_JIRA = "D";
-    private static final String LETTER_REAL = "E";
+    private static final String LETTER_FACTURAR = "E";
 
     private static final String JIRA_TITLE = "Horas imputadas (Jira) por Petición × Matrícula";
 
@@ -54,7 +54,7 @@ class ResponsablePivotBuilderTest {
         h.createCell(1).setCellValue("Matrícula");
         h.createCell(2).setCellValue("Res. Tecnico");
         h.createCell(3).setCellValue("Jira");
-        h.createCell(4).setCellValue("REAL");
+        h.createCell(4).setCellValue("Facturar");
         return wb;
     }
 

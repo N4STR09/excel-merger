@@ -18,11 +18,11 @@ import static com.excelmerger.config.ValidationHelpers.isBlank;
  * <p>Validaciones:</p>
  * <ul>
  *   <li>{@code responsables.tables.gapRows}: si presente, entero >= 0.</li>
- *   <li>{@code responsables.tables.jiraTitle} y {@code .realTitle}: si
+ *   <li>{@code responsables.tables.jiraTitle} y {@code .facturarTitle}: si
  *       están presentes, no pueden ser blancos.</li>
  * </ul>
  *
- * <p>No se valida que las columnas Petición/Matrícula/Res. Tecnico/Jira/REAL
+ * <p>No se valida que las columnas Petición/Matrícula/Res. Tecnico/Jira/Facturar
  * existan en Resultado: ese chequeo es runtime y emite warning si faltan
  * (mismo patrón que el resto de los builders).</p>
  *
@@ -63,9 +63,9 @@ final class ResponsablesTablesConfigSection {
         if (jiraTitle != null && isBlank(jiraTitle)) {
             errors.add("responsables.tables.jiraTitle: no puede estar vacio.");
         }
-        String realTitle = config.get("responsables.tables.realTitle", null);
-        if (realTitle != null && isBlank(realTitle)) {
-            errors.add("responsables.tables.realTitle: no puede estar vacio.");
+        String facturarTitle = config.get("responsables.tables.facturarTitle", null);
+        if (facturarTitle != null && isBlank(facturarTitle)) {
+            errors.add("responsables.tables.facturarTitle: no puede estar vacio.");
         }
     }
 }
