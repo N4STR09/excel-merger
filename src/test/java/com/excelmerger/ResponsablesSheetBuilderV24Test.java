@@ -18,16 +18,25 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Tests v2.4.0 de {@link ResponsablesSheetBuilder} centrados en las
  * tablas pivot por hoja de responsable.
  *
+ * <p><b>v2.7.0 (Modif 3)</b>: actualizado para reflejar el nuevo contrato:</p>
+ * <ul>
+ *   <li>La primera tabla pasa a ser PDCL (antes Jira).</li>
+ *   <li>La segunda tabla pasa a ser Jira (antes Facturar).</li>
+ *   <li>La columna fuente leida de Resultado pasa de Facturar a PDCL.
+ *       En el fixture de tests el valor numerico de PDCL coincide con
+ *       el que tenia Facturar (ambas formulas son {@code Jira*1.2}),
+ *       asi que los valores esperados de la pivot no cambian.</li>
+ * </ul>
+ *
  * <p>Construye una hoja {@code Resultado} con cabeceras realistas
- * (Petición, Matrícula, Res. Tecnico, Jira, Facturar) y filas de datos
+ * (Petición, Matrícula, Res. Tecnico, Jira, PDCL) y filas de datos
  * conocidas, y verifica:</p>
  * <ul>
  *   <li>Con {@code responsables.tables.enabled=true} (default), cada
  *       hoja de responsable contiene las dos pivots con la estructura
  *       descrita en la spec.</li>
  *   <li>Con {@code responsables.tables.enabled=false}, las hojas
- *       quedan como en v2.3.0 (solo cabecera A1 — el contrato de los
- *       14 tests existentes).</li>
+ *       quedan como en v2.3.0 (solo cabecera A1).</li>
  *   <li>Combinaciones evaluadas con {@link FormulaEvaluator} dan los
  *       valores esperados.</li>
  *   <li>Si falta una columna en Resultado, las pivots se omiten para
@@ -36,25 +45,28 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ResponsablesSheetBuilderV24Test {
 
-    /** Cabeceras de Resultado en orden A..E (las que el builder lee). */
+    /**
+     * Cabeceras de Resultado en orden A..E (las que el builder lee).
+     * v2.7.0 (Modif 3): la columna E pasa de Facturar a PDCL.
+     */
     private void writeResultadoHeader(Sheet sheet) {
         Row h = sheet.createRow(0);
         h.createCell(0).setCellValue("Petición");
         h.createCell(1).setCellValue("Matrícula");
         h.createCell(2).setCellValue("Res. Tecnico");
         h.createCell(3).setCellValue("Jira");
-        h.createCell(4).setCellValue("Facturar");
+        h.createCell(4).setCellValue("PDCL");
     }
 
     private void addRow(Sheet sheet, String peticion, String matricula,
-                        String responsable, double jira, double real) {
+                        String responsable, double jira, double pdcl) {
         int next = sheet.getLastRowNum() + 1;
         Row r = sheet.createRow(next);
         r.createCell(0).setCellValue(peticion);
         r.createCell(1).setCellValue(matricula);
         r.createCell(2).setCellValue(responsable);
         r.createCell(3).setCellValue(jira);
-        r.createCell(4).setCellValue(real);
+        r.createCell(4).setCellValue(pdcl);
     }
 
     /**
@@ -62,15 +74,20 @@ class ResponsablesSheetBuilderV24Test {
      * y 2 matrículas, distribuidas para que el SUMIFS tenga cosas
      * distintas que sumar (no todo a 0).
      *
+     * <p>v2.7.0 (Modif 3): los valores de la columna PDCL coinciden con
+     * los que tenia Facturar en v2.4.0..v2.6.0 (ambas formulas son
+     * {@code Jira*1.2}), por lo que los esperados numericos no cambian
+     * — solo cambia el nombre de la columna y el orden de las tablas.</p>
+     *
      * <pre>
      * tresp1@x:
-     *   P-001 / M-1001 -> Jira=5  Facturar=6
-     *   P-001 / M-1002 -> Jira=2  Facturar=2.4
-     *   P-002 / M-1001 -> Jira=10 Facturar=12
-     *   P-002 / M-1001 -> Jira=3  Facturar=3.6  (segunda imputacion misma combinacion)
+     *   P-001 / M-1001 -> Jira=5  PDCL=6
+     *   P-001 / M-1002 -> Jira=2  PDCL=2.4
+     *   P-002 / M-1001 -> Jira=10 PDCL=12
+     *   P-002 / M-1001 -> Jira=3  PDCL=3.6  (segunda imputacion misma combinacion)
      * tresp2@x:
-     *   P-003 / M-1003 -> Jira=7  Facturar=8.4
-     *   P-004 / M-1003 -> Jira=4  Facturar=4.8
+     *   P-003 / M-1003 -> Jira=7  PDCL=8.4
+     *   P-004 / M-1003 -> Jira=4  PDCL=4.8
      * </pre>
      *
      * <p>Esperados (tresp1@x, tabla Jira):</p>
@@ -125,7 +142,7 @@ class ResponsablesSheetBuilderV24Test {
     }
 
     // ==================================================================
-    //  Estructura básica con tablas habilitadas
+    //  Estructura básica con tablas habilitadas (v2.7.0 — orden invertido)
     // ==================================================================
 
     @Test
@@ -139,24 +156,28 @@ class ResponsablesSheetBuilderV24Test {
             // Fila 1 (0-based 0): cabecera A1
             assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("tresp1@x");
 
-            // Fila 3 (0-based 2): título tabla Jira
+            // v2.7.0 (Modif 3): primera tabla = PDCL.
+            // Fila 3 (0-based 2): título tabla PDCL
             String t1 = sheet.getRow(2).getCell(0).getStringCellValue();
-            assertThat(t1).contains("Jira");
+            assertThat(t1).as("primera tabla v2.7.0 = PDCL").contains("PDCL");
+            assertThat(t1).as("primera tabla NO debe contener 'Jira'").doesNotContain("Jira");
 
             // Para tresp1@x: 2 peticiones x 2 matriculas
-            // Layout:
-            //   row 2 (Excel 3):  título Jira
+            // Layout v2.7.0:
+            //   row 2 (Excel 3):  título PDCL  (antes Jira)
             //   row 3 (Excel 4):  cabecera (Petición | M-1001 | M-1002 | Total)
             //   row 4 (Excel 5):  P-001
             //   row 5 (Excel 6):  P-002
             //   row 6 (Excel 7):  Total
             //   row 7-8         : gap (2 filas en blanco)
-            //   row 9 (Excel 10): título Facturar
-            //   row 10..14      : cabecera+datos+total Facturar
+            //   row 9 (Excel 10): título Jira  (antes Facturar)
+            //   row 10..14      : cabecera+datos+total Jira
 
             // Title de la segunda tabla con gap=2: row = 6 + 1 + 2 = 9
             String t2 = sheet.getRow(9).getCell(0).getStringCellValue();
-            assertThat(t2).contains("Facturar");
+            assertThat(t2).as("segunda tabla v2.7.0 = Jira").contains("Jira");
+            // Sanity: no debe quedar referencia a 'Facturar' en titulos.
+            assertThat(t2).as("segunda tabla NO debe contener 'Facturar'").doesNotContain("Facturar");
 
             // Fila cabecera (row 10): Petición + matrículas + Total
             Row hdr2 = sheet.getRow(10);
@@ -168,69 +189,83 @@ class ResponsablesSheetBuilderV24Test {
     }
 
     @Test
-    void formulaEvaluatorDevuelveValoresEsperadosEnTablaJira() throws java.io.IOException {
+    void formulaEvaluatorDevuelveValoresEsperadosEnPrimeraTablaPDCL()
+            throws java.io.IOException {
         try (Workbook wb = buildRealisticWorkbook()) {
             new ResponsablesSheetBuilder(configWithTablesEnabled(), new RunReport()).buildAll(wb);
 
             Sheet sheet = wb.getSheet("tresp1@x");
             FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
 
-            // Tabla Jira: row 4 = P-001, row 5 = P-002
-            //            col 1 = M-1001, col 2 = M-1002, col 3 = Total
-            // P-001/M-1001 = 5
+            // v2.7.0: la PRIMERA tabla es ahora PDCL (antes era Jira).
+            // Layout: row 2 = titulo, row 3 = cabecera, row 4 = P-001,
+            //         row 5 = P-002, row 6 = Total.
+            //         col 1 = M-1001, col 2 = M-1002, col 3 = Total.
+            //
+            // Esperados PDCL = Jira * 1.2 segun fixture:
+            //   P-001/M-1001 = 6
+            //   P-001/M-1002 = 2.4
+            //   P-002/M-1001 = 12 + 3.6 = 15.6
+            //   Gran total   = 6 + 2.4 + 15.6 + 0 = 24
+
             assertThat(ev.evaluate(sheet.getRow(4).getCell(1)).getNumberValue())
-                    .as("Jira P-001 x M-1001").isEqualTo(5.0);
-            // P-001/M-1002 = 2
+                    .as("PDCL P-001 x M-1001").isEqualTo(6.0);
             assertThat(ev.evaluate(sheet.getRow(4).getCell(2)).getNumberValue())
-                    .as("Jira P-001 x M-1002").isEqualTo(2.0);
-            // P-002/M-1001 = 13 (10+3)
+                    .as("PDCL P-001 x M-1002").isEqualTo(2.4);
             assertThat(ev.evaluate(sheet.getRow(5).getCell(1)).getNumberValue())
-                    .as("Jira P-002 x M-1001").isEqualTo(13.0);
-            // P-002/M-1002 = 0
+                    .as("PDCL P-002 x M-1001").isEqualTo(15.6);
             assertThat(ev.evaluate(sheet.getRow(5).getCell(2)).getNumberValue())
-                    .as("Jira P-002 x M-1002 (sin filas)").isZero();
-
-            // Totales fila
-            assertThat(ev.evaluate(sheet.getRow(4).getCell(3)).getNumberValue())
-                    .as("Total fila P-001").isEqualTo(7.0);
-            assertThat(ev.evaluate(sheet.getRow(5).getCell(3)).getNumberValue())
-                    .as("Total fila P-002").isEqualTo(13.0);
-
-            // Totales columna (row 6)
-            assertThat(ev.evaluate(sheet.getRow(6).getCell(1)).getNumberValue())
-                    .as("Total col M-1001").isEqualTo(18.0);
-            assertThat(ev.evaluate(sheet.getRow(6).getCell(2)).getNumberValue())
-                    .as("Total col M-1002").isEqualTo(2.0);
+                    .as("PDCL P-002 x M-1002 (sin filas)").isZero();
 
             // Gran total
             assertThat(ev.evaluate(sheet.getRow(6).getCell(3)).getNumberValue())
-                    .as("Gran total Jira").isEqualTo(20.0);
+                    .as("Gran total PDCL").isEqualTo(24.0);
         }
     }
 
     @Test
-    void formulaEvaluatorDevuelveValoresEsperadosEnTablaReal() throws java.io.IOException {
+    void formulaEvaluatorDevuelveValoresEsperadosEnSegundaTablaJira()
+            throws java.io.IOException {
         try (Workbook wb = buildRealisticWorkbook()) {
             new ResponsablesSheetBuilder(configWithTablesEnabled(), new RunReport()).buildAll(wb);
 
             Sheet sheet = wb.getSheet("tresp1@x");
             FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
 
-            // Tabla Facturar: con gap=2, empieza en row 9 (título), 10 (cabecera),
-            // 11 (P-001), 12 (P-002), 13 (Total). Cuatro filas de datos -> 13 = total.
-            // P-001/M-1001 = 6
-            assertThat(ev.evaluate(sheet.getRow(11).getCell(1)).getNumberValue())
-                    .as("Facturar P-001 x M-1001").isEqualTo(6.0);
-            // P-001/M-1002 = 2.4
-            assertThat(ev.evaluate(sheet.getRow(11).getCell(2)).getNumberValue())
-                    .as("Facturar P-001 x M-1002").isEqualTo(2.4);
-            // P-002/M-1001 = 12 + 3.6 = 15.6
-            assertThat(ev.evaluate(sheet.getRow(12).getCell(1)).getNumberValue())
-                    .as("Facturar P-002 x M-1001").isEqualTo(15.6);
+            // v2.7.0: la SEGUNDA tabla es ahora Jira (antes era Facturar).
+            // Con gap=2, empieza en row 9 (titulo), 10 (cabecera), 11 (P-001),
+            // 12 (P-002), 13 (Total).
+            //
+            // Esperados Jira segun fixture:
+            //   P-001/M-1001 = 5
+            //   P-001/M-1002 = 2
+            //   P-002/M-1001 = 10 + 3 = 13
+            //   Gran total   = 5 + 2 + 13 + 0 = 20
 
-            // Gran total = 6 + 2.4 + 15.6 + 0 = 24
+            assertThat(ev.evaluate(sheet.getRow(11).getCell(1)).getNumberValue())
+                    .as("Jira P-001 x M-1001").isEqualTo(5.0);
+            assertThat(ev.evaluate(sheet.getRow(11).getCell(2)).getNumberValue())
+                    .as("Jira P-001 x M-1002").isEqualTo(2.0);
+            assertThat(ev.evaluate(sheet.getRow(12).getCell(1)).getNumberValue())
+                    .as("Jira P-002 x M-1001").isEqualTo(13.0);
+            assertThat(ev.evaluate(sheet.getRow(12).getCell(2)).getNumberValue())
+                    .as("Jira P-002 x M-1002 (sin filas)").isZero();
+
+            // Totales fila
+            assertThat(ev.evaluate(sheet.getRow(11).getCell(3)).getNumberValue())
+                    .as("Total fila P-001 (Jira)").isEqualTo(7.0);
+            assertThat(ev.evaluate(sheet.getRow(12).getCell(3)).getNumberValue())
+                    .as("Total fila P-002 (Jira)").isEqualTo(13.0);
+
+            // Totales columna (row 13)
+            assertThat(ev.evaluate(sheet.getRow(13).getCell(1)).getNumberValue())
+                    .as("Total col M-1001 (Jira)").isEqualTo(18.0);
+            assertThat(ev.evaluate(sheet.getRow(13).getCell(2)).getNumberValue())
+                    .as("Total col M-1002 (Jira)").isEqualTo(2.0);
+
+            // Gran total
             assertThat(ev.evaluate(sheet.getRow(13).getCell(3)).getNumberValue())
-                    .as("Gran total Facturar").isEqualTo(24.0);
+                    .as("Gran total Jira").isEqualTo(20.0);
         }
     }
 
@@ -243,24 +278,25 @@ class ResponsablesSheetBuilderV24Test {
             assertThat(sheet).isNotNull();
 
             // tresp2@x tiene P-003 y P-004 con matrícula M-1003.
-            // En la cabecera de la tabla Jira (row 3) la única matrícula es M-1003.
-            Row hdrJira = sheet.getRow(3);
-            assertThat(hdrJira.getCell(0).getStringCellValue()).isEqualTo("Petición");
-            assertThat(hdrJira.getCell(1).getStringCellValue()).isEqualTo("M-1003");
+            // En la cabecera de la PRIMERA tabla (PDCL en v2.7.0, row 3) la
+            // unica matricula es M-1003.
+            Row hdrPDCL = sheet.getRow(3);
+            assertThat(hdrPDCL.getCell(0).getStringCellValue()).isEqualTo("Petición");
+            assertThat(hdrPDCL.getCell(1).getStringCellValue()).isEqualTo("M-1003");
             // col 2 es la columna Total (única matrícula -> 1 + 1)
-            assertThat(hdrJira.getCell(2).getStringCellValue()).isEqualTo("Total");
+            assertThat(hdrPDCL.getCell(2).getStringCellValue()).isEqualTo("Total");
 
             // Data: row 4 = P-003, row 5 = P-004, row 6 = Total
             assertThat(sheet.getRow(4).getCell(0).getStringCellValue()).isEqualTo("P-003");
             assertThat(sheet.getRow(5).getCell(0).getStringCellValue()).isEqualTo("P-004");
 
             FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
-            // P-003 x M-1003 = 7
-            assertThat(ev.evaluate(sheet.getRow(4).getCell(1)).getNumberValue()).isEqualTo(7.0);
-            // P-004 x M-1003 = 4
-            assertThat(ev.evaluate(sheet.getRow(5).getCell(1)).getNumberValue()).isEqualTo(4.0);
-            // Gran total = 11
-            assertThat(ev.evaluate(sheet.getRow(6).getCell(2)).getNumberValue()).isEqualTo(11.0);
+            // PDCL P-003 x M-1003 = 8.4
+            assertThat(ev.evaluate(sheet.getRow(4).getCell(1)).getNumberValue()).isEqualTo(8.4);
+            // PDCL P-004 x M-1003 = 4.8
+            assertThat(ev.evaluate(sheet.getRow(5).getCell(1)).getNumberValue()).isEqualTo(4.8);
+            // Gran total PDCL = 13.2
+            assertThat(ev.evaluate(sheet.getRow(6).getCell(2)).getNumberValue()).isEqualTo(13.2);
         }
     }
 
@@ -290,9 +326,9 @@ class ResponsablesSheetBuilderV24Test {
             assertThat(sheet).isNotNull();
             // Hoja tiene más de una fila — las pivots se han generado.
             assertThat(sheet.getLastRowNum()).isGreaterThan(5);
-            // Fila 2 contiene el título de la primera pivot.
+            // v2.7.0: Fila 2 contiene el título de la primera pivot (PDCL).
             assertThat(sheet.getRow(2).getCell(0).getStringCellValue())
-                    .contains("Jira");
+                    .contains("PDCL");
         }
     }
 
@@ -330,20 +366,23 @@ class ResponsablesSheetBuilderV24Test {
     // ==================================================================
 
     @Test
-    void columnaJiraAusenteEnResultadoOmitePivotsConWarning() throws java.io.IOException {
-        // Resultado sin columna Jira: las pivots no deben generarse
-        // (no podemos sumar lo que no existe). La hoja queda como v2.3.0.
+    void columnaPDCLAusenteEnResultadoOmitePivotsConWarning() throws java.io.IOException {
+        // v2.7.0 (Modif 3): la columna fuente de la primera pivot es PDCL
+        // (antes Facturar). Sin PDCL en Resultado, las pivots no deben
+        // generarse y el warning debe mencionar la columna que falta.
         try (Workbook wb = new XSSFWorkbook()) {
             Sheet res = wb.createSheet("Resultado");
             Row h = res.createRow(0);
             h.createCell(0).setCellValue("Petición");
             h.createCell(1).setCellValue("Matrícula");
             h.createCell(2).setCellValue("Res. Tecnico");
-            // SIN Jira/Facturar
+            h.createCell(3).setCellValue("Jira");
+            // SIN PDCL — solo Jira.
             Row r1 = res.createRow(1);
             r1.createCell(0).setCellValue("P-001");
             r1.createCell(1).setCellValue("M-1001");
             r1.createCell(2).setCellValue("tresp1@x");
+            r1.createCell(3).setCellValue(5.0);
 
             RunReport report = new RunReport();
             new ResponsablesSheetBuilder(configWithTablesEnabled(), report).buildAll(wb);
@@ -355,7 +394,7 @@ class ResponsablesSheetBuilderV24Test {
 
             assertThat(report.warnings()).anyMatch(w ->
                     "RESPONSABLE".equals(w.category) && w.message.contains("omitidas")
-                            && w.message.contains("Jira"));
+                            && w.message.contains("PDCL"));
         }
     }
 
@@ -369,7 +408,7 @@ class ResponsablesSheetBuilderV24Test {
             new ResponsablesSheetBuilder(configWithTablesEnabled(), new RunReport()).buildAll(wb);
 
             Sheet sheet = wb.getSheet("tresp1@x");
-            // Celda dato (P-001 x M-1001)
+            // Celda dato (P-001 x M-1001) — primera tabla = PDCL (v2.7.0)
             Cell c = sheet.getRow(4).getCell(1);
             assertThat(c.getCellType()).isEqualTo(CellType.FORMULA);
             // Celda total

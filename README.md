@@ -266,8 +266,11 @@ Las pivots se controlan con cuatro claves nuevas en `config.properties`:
 responsables.tables.enabled=true
 
 # Títulos (literal en la fila merged).
+# v2.7.0 (Modif 3): primera tabla = PDCL, segunda = Jira (orden invertido
+# respecto a v2.4.0..v2.6.0). La clave facturarTitle (v2.4.0..v2.6.0) y la
+# aún más vieja realTitle (≤v2.5.1) son rechazadas con error de migración.
+responsables.tables.pdclTitle=PDCL por Petición × Matrícula
 responsables.tables.jiraTitle=Horas imputadas (Jira) por Petición × Matrícula
-responsables.tables.facturarTitle=Facturar por Petición × Matrícula
 
 # Filas en blanco entre las dos tablas. Admite 0. Default 2.
 responsables.tables.gapRows=2
@@ -420,6 +423,12 @@ mes.sheetName=Resultado
 mes.sourceSheet=Cierre
 mes.sourceHeaderRow=1
 mes.anchorColumn=Peticion
+
+# v2.7.1: filtrado de filas con las 5 columnas numéricas (Jira, Facturar,
+# PDCL, PDCL + Deuda, Horas_Mes) evaluando todas a 0. La fila se elimina
+# físicamente del libro de salida. Default: true. Para volver al
+# comportamiento de v2.7.0 (no filtrar nada), poner a false.
+mes.removeEmptyRows=true
 
 mes.col.1.name=Petición
 mes.col.1.type=COPY

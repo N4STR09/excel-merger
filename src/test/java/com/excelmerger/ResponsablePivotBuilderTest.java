@@ -28,7 +28,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Las columnas en Resultado se montan idénticas a las que produce
  * {@code MesSheetBuilder} en producción (orden y nombres):
- * Petición(A), Matrícula(B), Res. Tecnico(C), Jira(D), Facturar(E).</p>
+ * Petición(A), Matrícula(B), Res. Tecnico(C), Jira(D), PDCL(E).
+ * v2.7.0 (Modif 3): la columna E paso de Facturar a PDCL, acompañando
+ * el cambio de fuente de la primera tabla pivot. Estos tests son
+ * unitarios sobre {@link ResponsablePivotBuilder} y son agnosticos al
+ * nombre de la columna sumada — solo importa la letra Excel — pero el
+ * literal se mantiene alineado con el output de produccion v2.7.0.</p>
  */
 class ResponsablePivotBuilderTest {
 
@@ -37,7 +42,8 @@ class ResponsablePivotBuilderTest {
     private static final String LETTER_MATRICULA = "B";
     private static final String LETTER_RESPONSABLE = "C";
     private static final String LETTER_JIRA = "D";
-    private static final String LETTER_FACTURAR = "E";
+    /** v2.7.0: la letra E corresponde ahora a PDCL (antes Facturar). */
+    private static final String LETTER_PDCL = "E";
 
     private static final String JIRA_TITLE = "Horas imputadas (Jira) por Petición × Matrícula";
 
@@ -54,13 +60,13 @@ class ResponsablePivotBuilderTest {
         h.createCell(1).setCellValue("Matrícula");
         h.createCell(2).setCellValue("Res. Tecnico");
         h.createCell(3).setCellValue("Jira");
-        h.createCell(4).setCellValue("Facturar");
+        h.createCell(4).setCellValue("PDCL");
         return wb;
     }
 
     /** Añade una fila de datos a Resultado (peticion+matricula como STRING, hours como NUMERIC). */
     private void addResultadoRow(Workbook wb, String peticion, String matricula,
-                                 String responsable, double jira, double real) {
+                                 String responsable, double jira, double pdcl) {
         Sheet res = wb.getSheet("Resultado");
         int next = res.getLastRowNum() + 1;
         Row r = res.createRow(next);
@@ -68,7 +74,7 @@ class ResponsablePivotBuilderTest {
         r.createCell(1).setCellValue(matricula);
         r.createCell(2).setCellValue(responsable);
         r.createCell(3).setCellValue(jira);
-        r.createCell(4).setCellValue(real);
+        r.createCell(4).setCellValue(pdcl);
     }
 
     /** ConfigLoader mínimo (no se usa en el helper salvo para construcción). */

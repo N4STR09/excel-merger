@@ -18,11 +18,16 @@ import static com.excelmerger.config.ValidationHelpers.isBlank;
  * <p>Validaciones:</p>
  * <ul>
  *   <li>{@code responsables.tables.gapRows}: si presente, entero >= 0.</li>
- *   <li>{@code responsables.tables.jiraTitle} y {@code .facturarTitle}: si
+ *   <li>{@code responsables.tables.jiraTitle} y {@code .pdclTitle}: si
  *       están presentes, no pueden ser blancos.</li>
+ *   <li>v2.7.0: claves obsoletas {@code responsables.tables.facturarTitle}
+ *       (v2.4.0..v2.6.0) y {@code responsables.tables.realTitle}
+ *       (≤v2.5.1) son rechazadas con error explícito y mensaje de migración.
+ *       Esto evita degradados silenciosos cuando un usuario actualiza el
+ *       binario sin migrar el config.</li>
  * </ul>
  *
- * <p>No se valida que las columnas Petición/Matrícula/Res. Tecnico/Jira/Facturar
+ * <p>No se valida que las columnas Petición/Matrícula/Res. Tecnico/Jira/PDCL
  * existan en Resultado: ese chequeo es runtime y emite warning si faltan
  * (mismo patrón que el resto de los builders).</p>
  *
@@ -63,9 +68,25 @@ final class ResponsablesTablesConfigSection {
         if (jiraTitle != null && isBlank(jiraTitle)) {
             errors.add("responsables.tables.jiraTitle: no puede estar vacio.");
         }
-        String facturarTitle = config.get("responsables.tables.facturarTitle", null);
-        if (facturarTitle != null && isBlank(facturarTitle)) {
-            errors.add("responsables.tables.facturarTitle: no puede estar vacio.");
+        // v2.7.0 (Modif 3): clave nueva pdclTitle (rename de facturarTitle).
+        String pdclTitle = config.get("responsables.tables.pdclTitle", null);
+        if (pdclTitle != null && isBlank(pdclTitle)) {
+            errors.add("responsables.tables.pdclTitle: no puede estar vacio.");
+        }
+
+        // v2.7.0 (Modif 3): rechazo explicito de claves obsoletas.
+        // Sin alias retrocompat — mantenerlos hace que el output salga con
+        // el titulo viejo en silencio, lo opuesto a lo que el usuario pidio
+        // al renombrar la fuente Facturar -> PDCL.
+        if (config.has("responsables.tables.facturarTitle")) {
+            errors.add("responsables.tables.facturarTitle: clave obsoleta en v2.7.0. "
+                    + "Renombrala a 'responsables.tables.pdclTitle' (la pivot ahora lee "
+                    + "la columna PDCL en lugar de Facturar — Modif 3).");
+        }
+        if (config.has("responsables.tables.realTitle")) {
+            errors.add("responsables.tables.realTitle: clave obsoleta desde v2.6.0. "
+                    + "Renombrala a 'responsables.tables.pdclTitle' en v2.7.0 "
+                    + "(la columna paso de REAL a Facturar en v2.6.0 y a PDCL en v2.7.0).");
         }
     }
 }

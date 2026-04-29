@@ -35,10 +35,10 @@ import java.util.Set;
  *
  * <p>Por defecto cada hoja de responsable contiene, ademas de la cabecera
  * A1 (presente desde v2.3.0), dos tablas pivot Petición × Matrícula
- * apiladas verticalmente:</p>
+ * apiladas verticalmente. <b>Orden v2.7.0 (Modif 3):</b></p>
  * <ol>
+ *   <li>PDCL por Petición × Matrícula <i>(antes: Facturar; v2.7.0)</i>.</li>
  *   <li>Horas imputadas (Jira) por Petición × Matrícula.</li>
- *   <li>Facturar por Petición × Matrícula.</li>
  * </ol>
  *
  * <p>Las pivots son SUMIFS vivos contra Resultado, filtrados por el
@@ -90,20 +90,28 @@ public class ResponsablesSheetBuilder {
     private static final String COL_PETICION = "Petición";
     private static final String COL_MATRICULA = "Matrícula";
     private static final String COL_JIRA = "Jira";
-    private static final String COL_FACTURAR = "Facturar";
+    /**
+     * v2.7.0 (Modif 3): la primera tabla pivot pasa a leer la columna PDCL
+     * (mes.col.12, fórmula {@code {col:Jira}*1.2}) en lugar de Facturar
+     * (mes.col.11). El usuario quiere ver la columna PDCL real en la pivot
+     * principal de cada hoja de responsable. La constante COL_FACTURAR de
+     * v2.4.0..v2.6.0 desaparece; el builder ya no consulta Facturar.
+     */
+    private static final String COL_PDCL = "PDCL";
     private static final String COL_RESPONSABLE = "Res. Tecnico";
 
-    /** Defaults v2.4.0 — claves nuevas. */
+    /** Defaults v2.7.0 — claves nuevas. */
     private static final String DEFAULT_JIRA_TITLE =
             "Horas imputadas (Jira) por Petición × Matrícula";
     /**
-     * v2.6.0: la columna y el titulo se renombran de REAL a Facturar.
-     * El default acompaña al rename. Si tenias responsables.tables.realTitle
-     * en config.properties, renombra la clave a responsables.tables.facturarTitle
-     * (no hay alias retrocompat).
+     * v2.7.0 (Modif 3): la primera tabla pasa a ser PDCL. Antes el default era
+     * "Facturar por Petición × Matrícula" bajo la clave facturarTitle (v2.4.0..v2.6.0)
+     * o "REAL por Petición × Matrícula" bajo realTitle (≤v2.5.1). Ambas claves
+     * obsoletas son rechazadas con error en v2.7.0 — ver
+     * {@link com.excelmerger.config.ResponsablesTablesConfigSection}.
      */
-    private static final String DEFAULT_FACTURAR_TITLE =
-            "Facturar por Petición × Matrícula";
+    private static final String DEFAULT_PDCL_TITLE =
+            "PDCL por Petición × Matrícula";
     private static final int DEFAULT_GAP_ROWS = 2;
 
     private final ConfigLoader config;
@@ -118,8 +126,15 @@ public class ResponsablesSheetBuilder {
      * Punto de entrada. Recorre Resultado, descubre los responsables únicos
      * y, para cada uno, crea su hoja con la cabecera A1 y (si las tablas
      * pivot están habilitadas) las dos tablas pivot.
+     *
+     * <p>v2.7.0 (Modif 1): devuelve la lista de nombres de hoja creados (en
+     * el orden en que se crearon), para que el paso final de freeze top row
+     * pueda excluirlos (decision Fase 0 P1: las hojas de responsable NO
+     * tienen freeze). Si no se crea ninguna hoja, devuelve lista vacia
+     * (nunca {@code null}).</p>
      */
-    public void buildAll(Workbook workbook) {
+    public List<String> buildAll(Workbook workbook) {
+        List<String> created = new ArrayList<>();
         String resultadoName = config.get("mes.sheetName", "MES");
         String responsibleColumn = config.get("summary.byResponsible.column", COL_RESPONSABLE);
 
@@ -130,7 +145,7 @@ public class ResponsablesSheetBuilder {
             report.addWarning(WARN_CATEGORY,
                     "No se pudo construir hojas por responsable: hoja '"
                             + resultadoName + "' ausente.");
-            return;
+            return created;
         }
         Row header = resultado.getRow(0);
         if (header == null) {
@@ -139,7 +154,7 @@ public class ResponsablesSheetBuilder {
             report.addWarning(WARN_CATEGORY,
                     "No se pudo construir hojas por responsable: hoja '"
                             + resultadoName + "' sin cabecera.");
-            return;
+            return created;
         }
         int respColIdx = PoiUtils.findColumnIndex(header, responsibleColumn);
         if (respColIdx < 0) {
@@ -148,14 +163,14 @@ public class ResponsablesSheetBuilder {
             report.addWarning(WARN_CATEGORY,
                     "No se pudo construir hojas por responsable: columna '"
                             + responsibleColumn + "' no encontrada en '" + resultadoName + "'.");
-            return;
+            return created;
         }
         if (resultado.getLastRowNum() < 1) {
             log.info("[Responsables] La hoja '{}' no tiene filas de datos; nada que generar.",
                     resultadoName);
             report.addWarning(WARN_CATEGORY,
                     "Hoja '" + resultadoName + "' sin filas de datos; 0 hojas por responsable generadas.");
-            return;
+            return created;
         }
 
         // v2.4.0 — descubrir, en una sola pasada, responsables + peticiones + matriculas
@@ -171,7 +186,7 @@ public class ResponsablesSheetBuilder {
         if (dataByLowerKey.isEmpty()) {
             log.info("[Responsables] No hay responsables no-vacios en '{}'; 0 hojas generadas.",
                     resultadoName);
-            return;
+            return created;
         }
 
         // Ordenar alfabeticamente por nombre canonico con Collator es_ES PRIMARY.
@@ -198,6 +213,7 @@ public class ResponsablesSheetBuilder {
 
         for (ResponsableData rd : ordered) {
             String unique = createSheetForResponsable(workbook, rd, titleStyle);
+            created.add(unique);
             Sheet sheet = workbook.getSheet(unique);
 
             int rowsInSheet = 1;
@@ -230,6 +246,7 @@ public class ResponsablesSheetBuilder {
             log.info("[Responsables] Total: {} hojas con {} pivots y {} SUMIFS.",
                     ordered.size(), totalTables, totalSumifs);
         }
+        return created;
     }
 
     // ==================================================================
@@ -318,10 +335,13 @@ public class ResponsablesSheetBuilder {
 
     /**
      * Devuelve las letras Excel de las columnas Petición, Matrícula,
-     * Res. Tecnico, Jira y Facturar en la hoja Resultado. Si alguna falta y
+     * Res. Tecnico, Jira y PDCL en la hoja Resultado. Si alguna falta y
      * las tablas están habilitadas, registra un warning y devuelve {@code null}
      * (lo que desactiva las pivots para todas las hojas en esta ejecución).
      * Si las tablas están deshabilitadas, devuelve {@code null} sin warning.
+     *
+     * <p>v2.7.0 (Modif 3): la columna leida por la primera pivot pasa a ser
+     * PDCL en lugar de Facturar.</p>
      */
     private ColumnLetters resolveColumnLetters(Row headerRow, String resultadoName,
                                                 boolean tablesEnabled) {
@@ -331,14 +351,14 @@ public class ResponsablesSheetBuilder {
         String matLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_MATRICULA);
         String respLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_RESPONSABLE);
         String jiraLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_JIRA);
-        String facturarLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_FACTURAR);
+        String pdclLetter = ResponsablePivotBuilder.letterOrNull(headerRow, COL_PDCL);
 
         List<String> missing = new ArrayList<>();
         if (petLetter == null) missing.add(COL_PETICION);
         if (matLetter == null) missing.add(COL_MATRICULA);
         if (respLetter == null) missing.add(COL_RESPONSABLE);
         if (jiraLetter == null) missing.add(COL_JIRA);
-        if (facturarLetter == null) missing.add(COL_FACTURAR);
+        if (pdclLetter == null) missing.add(COL_PDCL);
         if (!missing.isEmpty()) {
             String msg = "Tablas pivot por responsable omitidas: columna(s) ausente(s) en '"
                     + resultadoName + "': " + String.join(", ", missing) + ".";
@@ -346,7 +366,7 @@ public class ResponsablesSheetBuilder {
             report.addWarning(WARN_CATEGORY, msg);
             return null;
         }
-        return new ColumnLetters(petLetter, matLetter, respLetter, jiraLetter, facturarLetter);
+        return new ColumnLetters(petLetter, matLetter, respLetter, jiraLetter, pdclLetter);
     }
 
     // ==================================================================
@@ -354,9 +374,16 @@ public class ResponsablesSheetBuilder {
     // ==================================================================
 
     /**
-     * Escribe las dos tablas pivot (Jira y Facturar) en {@code sheet} y devuelve
-     * el indice 0-based de la última fila ocupada (para calcular cuántas filas
+     * Escribe las dos tablas pivot en {@code sheet} y devuelve el indice
+     * 0-based de la última fila ocupada (para calcular cuántas filas
      * tiene la hoja en el {@link RunReport}).
+     *
+     * <p>v2.7.0 (Modif 3): el orden se invierte respecto a v2.4.0..v2.6.0.
+     * Antes era Jira primero, Facturar segunda. Ahora es PDCL primero, Jira
+     * segunda. La fuente de la primera tabla pasa de Facturar (mes.col.11)
+     * a PDCL (mes.col.12). El gap entre tablas y el calculo de la fila
+     * de inicio de la segunda tabla se mantienen identicos: la segunda
+     * tabla empieza en {@code primera.lastRow0 + 1 + gapRows}.</p>
      */
     private int writePivots(Workbook wb, Sheet sheet, String resultadoName,
                             ColumnLetters letters, ResponsableData rd) {
@@ -366,18 +393,31 @@ public class ResponsablesSheetBuilder {
         List<String> matriculasSorted = PoiUtils.mixedNumericLexicographicSort(rd.matriculas);
 
         int sumifsMaxRow = Math.max(2, config.getInt("summary.sumifsMaxRow", 10000));
+        // v2.7.0: la clave era "responsables.tables.facturarTitle" hasta v2.6.0
+        // y "responsables.tables.realTitle" hasta v2.5.1. Ambas se rechazan
+        // con error en ResponsablesTablesConfigSection (sin alias retrocompat).
+        String pdclTitle = config.get("responsables.tables.pdclTitle", DEFAULT_PDCL_TITLE);
         String jiraTitle = config.get("responsables.tables.jiraTitle", DEFAULT_JIRA_TITLE);
-        // v2.6.0: la clave era "responsables.tables.realTitle" hasta v2.5.1.
-        // Sin alias retrocompat: si se usa la clave vieja, el codigo aplica
-        // el default (Facturar por Petición × Matrícula). Documentado en
-        // CHANGELOG seccion Migración.
-        String facturarTitle = config.get("responsables.tables.facturarTitle", DEFAULT_FACTURAR_TITLE);
         int gapRows = Math.max(0,
                 config.getInt("responsables.tables.gapRows", DEFAULT_GAP_ROWS));
 
         ResponsablePivotBuilder pivot = new ResponsablePivotBuilder(config);
 
-        // Tabla 1 (Jira) — empieza en fila 2 (0-based) = fila Excel 3.
+        // Tabla 1 (PDCL) — empieza en fila 2 (0-based) = fila Excel 3.
+        // v2.7.0 (Modif 3): antes la primera tabla era Jira; ahora es PDCL.
+        ResponsablePivotBuilder.PivotInputs pdclInputs = new ResponsablePivotBuilder.PivotInputs(
+                resultadoName,
+                letters.peticion, letters.matricula, letters.responsable, letters.pdcl,
+                pdclTitle,
+                peticionesSorted, matriculasSorted,
+                sumifsMaxRow);
+        ResponsablePivotBuilder.PivotResult pdclResult =
+                pivot.writeTable(wb, sheet, 2, pdclInputs);
+
+        // Tabla 2 (Jira) — empieza tras la primera + gapRows filas en blanco.
+        // v2.7.0 (Modif 3): antes esta era la primera tabla; ahora va segunda.
+        int jiraStartRow0 = pdclResult.lastRow0 + 1 + gapRows;
+
         ResponsablePivotBuilder.PivotInputs jiraInputs = new ResponsablePivotBuilder.PivotInputs(
                 resultadoName,
                 letters.peticion, letters.matricula, letters.responsable, letters.jira,
@@ -385,21 +425,9 @@ public class ResponsablesSheetBuilder {
                 peticionesSorted, matriculasSorted,
                 sumifsMaxRow);
         ResponsablePivotBuilder.PivotResult jiraResult =
-                pivot.writeTable(wb, sheet, 2, jiraInputs);
+                pivot.writeTable(wb, sheet, jiraStartRow0, jiraInputs);
 
-        // Tabla 2 (Facturar) — empieza tras la primera + gapRows filas en blanco.
-        int facturarStartRow0 = jiraResult.lastRow0 + 1 + gapRows;
-
-        ResponsablePivotBuilder.PivotInputs facturarInputs = new ResponsablePivotBuilder.PivotInputs(
-                resultadoName,
-                letters.peticion, letters.matricula, letters.responsable, letters.facturar,
-                facturarTitle,
-                peticionesSorted, matriculasSorted,
-                sumifsMaxRow);
-        ResponsablePivotBuilder.PivotResult facturarResult =
-                pivot.writeTable(wb, sheet, facturarStartRow0, facturarInputs);
-
-        return facturarResult.lastRow0;
+        return jiraResult.lastRow0;
     }
 
     // ==================================================================
@@ -447,21 +475,25 @@ public class ResponsablesSheetBuilder {
         }
     }
 
-    /** Letras Excel de las 5 columnas que las pivots leen de Resultado. */
+    /**
+     * Letras Excel de las 5 columnas que las pivots leen de Resultado.
+     * v2.7.0 (Modif 3): el último campo se renombra de {@code facturar} a
+     * {@code pdcl} acompañando el cambio de fuente de la primera pivot.
+     */
     private static final class ColumnLetters {
         final String peticion;
         final String matricula;
         final String responsable;
         final String jira;
-        final String facturar;
+        final String pdcl;
 
         ColumnLetters(String peticion, String matricula, String responsable,
-                      String jira, String facturar) {
+                      String jira, String pdcl) {
             this.peticion = peticion;
             this.matricula = matricula;
             this.responsable = responsable;
             this.jira = jira;
-            this.facturar = facturar;
+            this.pdcl = pdcl;
         }
     }
 }

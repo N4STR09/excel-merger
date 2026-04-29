@@ -246,8 +246,14 @@ public class ExcelMerger {
             //     COMPLETO el orden visible sea Cierre, Extraccion, Deuda,
             //     Resultado, Resumen, [responsables alfa] (Equipos esta
             //     entremedias pero oculta; ver Fase 0 P3 opcion (a)).
+            //
+            // v2.7.0 (Modif 1): buildAll devuelve la lista de nombres de
+            // hoja creados; se usa en el paso 5g-bis para excluir esas
+            // hojas del freeze top row (decision Fase 0 P1).
+            List<String> responsableSheetNames = Collections.emptyList();
             if (outputMode == OutputMode.RESPONSABLES || outputMode == OutputMode.COMPLETO) {
-                new ResponsablesSheetBuilder(config, report).buildAll(result);
+                responsableSheetNames =
+                        new ResponsablesSheetBuilder(config, report).buildAll(result);
             }
 
             // 5g. Hoja de avisos (opt-in con report.inExcel=true). Se construye
@@ -256,6 +262,17 @@ public class ExcelMerger {
             //     encontradas, etc.). En dry-run se construye igual: queda en
             //     memoria pero no se escribe a disco.
             new AvisosSheetBuilder(config, report).build(result);
+
+            // 5g-bis. Freeze top row (v2.7.0 Modif 1).
+            //     Aplica createFreezePane(0, 1) a todas las hojas visibles
+            //     EXCEPTO las hojas ocultas (Equipos) y las hojas de
+            //     responsable (Fase 0 P1). Opt-out con
+            //     output.freezeTopRow=false (default true).
+            //     Se ejecuta despues de Avisos para que tambien la cabecera
+            //     de la hoja de avisos quede congelada si esta presente.
+            if (config.getBoolean("output.freezeTopRow", true)) {
+                applyFreezeTopRow(result, responsableSheetNames);
+            }
 
             // 5h. Escribir el resultado (omitido en dry-run)
             if (dryRun) {
@@ -680,5 +697,62 @@ public class ExcelMerger {
         int totalRows = target.getLastRowNum() + 1;
         report.addSheet(resultSheetName, totalRows);
         log.info("[Merger] Filas fusionadas en la hoja: {} ({} filas)", resultSheetName, totalRows);
+    }
+
+    // ==================================================================
+    //  v2.7.0 (Modif 1) — Freeze top row en hojas visibles
+    // ==================================================================
+
+    /**
+     * Aplica {@code createFreezePane(0, 1)} a todas las hojas visibles del
+     * libro <i>excepto</i>:
+     * <ul>
+     *   <li>Hojas ocultas — detectadas por {@link Workbook#isSheetHidden(int)}
+     *       y {@link Workbook#isSheetVeryHidden(int)}. La unica hoja oculta
+     *       en v2.7.0 es {@code Equipos} (lookup oculto via
+     *       {@code lookup.Equipos.hidden=true} en config.properties).</li>
+     *   <li>Hojas de responsable — los nombres se reciben desde
+     *       {@link ResponsablesSheetBuilder#buildAll(Workbook)}. Decision
+     *       Fase 0 P1: las hojas de responsable son tipograficamente
+     *       distintas (cabecera A1 grande, pivots sin cabecera tipo tabla
+     *       en row 1) y un freeze de la fila 1 dejaria solo el nombre del
+     *       responsable visible al hacer scroll, lo cual no aporta nada.</li>
+     * </ul>
+     *
+     * <p>El freeze se hace sobre el <i>workbook completo</i> al final, no
+     * dentro de cada builder, para evitar dispersar la lógica y para que
+     * convivan limpiamente las hojas que pasan tal cual desde input
+     * (Cierre/Extraccion/Deuda — copiadas con SheetCopier) y las generadas
+     * desde cero (Resultado, Resumen, _Avisos).</p>
+     *
+     * <p>Idempotente: invocar dos veces deja el mismo resultado. POI
+     * sobrescribe el panel previo si existe.</p>
+     *
+     * @param workbook libro destino con todas las hojas ya construidas.
+     * @param responsableSheetNames nombres de las hojas creadas por
+     *     {@link ResponsablesSheetBuilder} en esta ejecucion. Puede estar
+     *     vacia (modo {@code cierre} o cuando no hay responsables) pero
+     *     no debe ser {@code null}.
+     */
+    private void applyFreezeTopRow(Workbook workbook, List<String> responsableSheetNames) {
+        Set<String> excluded = new HashSet<>(responsableSheetNames);
+        int frozen = 0;
+        int skippedHidden = 0;
+        int skippedResponsable = 0;
+        for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+            if (workbook.isSheetHidden(i) || workbook.isSheetVeryHidden(i)) {
+                skippedHidden++;
+                continue;
+            }
+            Sheet sheet = workbook.getSheetAt(i);
+            if (excluded.contains(sheet.getSheetName())) {
+                skippedResponsable++;
+                continue;
+            }
+            sheet.createFreezePane(0, 1);
+            frozen++;
+        }
+        log.info("[FreezeTopRow] {} hoja(s) con freeze; {} oculta(s) y {} de responsable excluidas.",
+                frozen, skippedHidden, skippedResponsable);
     }
 }

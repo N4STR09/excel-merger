@@ -1,5 +1,219 @@
 # Changelog
 
+## [2.7.1.2] — Hotfix sobre 2.7.1.1: traducción de auto-referencias `Resultado!$X$N` tras compactar
+
+Hotfix sobre 2.7.1.1. La 2.7.1.1 arregló el filtrado de filas con `Horas_Mes` STRING `"0.00"`, pero introdujo (mejor dicho, expuso) un bug **silencioso y grave** en las fórmulas `PDCL + Deuda` de las filas supervivientes: tras la compactación, las referencias absolutas a la propia hoja (`Resultado!$A$<row>`, `Resultado!$F$<row>`, `Resultado!$G$<row>`) quedaban apuntando al `<row>` original, que tras el shift correspondía a una fila distinta (otra petición/matrícula/función). El SUMIFS contra `Deuda!` no encontraba match y devolvía `0`, **perdiendo silenciosamente las horas de deuda** para todas las filas movidas por la compactación.
+
+Detectado al inspeccionar el output: la fila `(117847, 90014, AN)` tenía `PDCL + Deuda = 0` cuando la hoja `Deuda` contenía 16 entradas reales para esa clave que sumaban ~1015 horas.
+
+### Causa raíz
+
+`FormulaPlusSumIfsColumnStrategy.doWriteCell` genera la columna `PDCL + Deuda` así:
+
+```
+L40 + IFERROR(SUMIFS(
+    Deuda!$D:$D,
+    Deuda!$A:$A, Resultado!$A$66,
+    Deuda!$B:$B, Resultado!$F$66,
+    Deuda!$C:$C, Resultado!$G$66
+), 0)
+```
+
+Las tres `Resultado!$X$66` son **auto-referencias absolutas** a la propia hoja: el SUMIFS debe usar como criterio el valor de Petición/Matrícula/Función **de la misma fila**. Mi `translateLocalRowRefs` de v2.7.1 estaba **deliberadamente diseñado** para no tocar referencias precedidas por `!` (asumiendo que toda referencia con prefijo de hoja era a "otra hoja distinta"). Esa asunción era incorrecta: una referencia a `Resultado!` desde la propia hoja `Resultado` es local y debe traducirse al hacer shift de la fila.
+
+### Cambiado
+
+`EmptyRowFilter.translateLocalRowRefs` ahora acepta el nombre de la hoja actual como cuarto parámetro (sobrecarga nueva); cuando se invoca con `currentSheetName="Resultado"`, el método **traduce también** las referencias `Resultado!{$?}<col>{$?}<srcRow>` (cualquier combinación de absolutas/relativas) a la fila destino. Las referencias a otras hojas (`Cierre!`, `Deuda!`, `Equipos!`, etc.) siguen sin tocarse, como antes. La sobrecarga sin nombre de hoja se mantiene para los tests unitarios que no dependen del contexto de hoja.
+
+`EmptyRowFilter.copyRowShallow` (invocado por `compactRows`) lee ahora `src.getSheet().getSheetName()` y pasa ese nombre a la nueva sobrecarga.
+
+Heurística de seguridad: si una referencia de prefijo coincide pero el carácter previo es alfanumérico (caso `MiResultado!` cuando `currentSheetName="Resultado"`), no se traduce.
+
+### Tests añadidos
+
+- `translateLocalRowRefsTraduceAutoReferenciasAbsolutas`: el caso real que rompía. Verifica que la fórmula completa de `PDCL + Deuda` con tres `Resultado!$X$66` se traduce correctamente a `Resultado!$X$40` cuando `srcRow=66, dstRow=40, currentSheet="Resultado"`.
+- `translateLocalRowRefsTraduceAutoReferenciasMixtas`: verifica formas relativa (`Resultado!J5`), absoluta (`Resultado!$J$5`) y mixta (`Resultado!J$5`).
+- `translateLocalRowRefsNoMatcheaPrefijosParecidos`: verifica que `MiResultado!$A$5` con `currentSheet="Resultado"` NO se toca (prefijo extendido por carácter previo alfanumérico).
+- `translateLocalRowRefsRespetaReferenciasAOtraHoja` (renombrado): ahora prueba con `currentSheet="Resultado"` que `Cierre!$A$5` y `Deuda!$D:$D` no se tocan, mientras que `A5` (local) sí.
+- `translateLocalRowRefsSinHojaActualNoTocaPrefijos` (caso anterior): verifica que la sobrecarga sin `currentSheetName` mantiene el comportamiento conservador de no tocar nada con prefijo (útil para tests aislados).
+
+### Riesgo aceptado
+
+La heurística textual es deliberadamente conservadora: si en el futuro `MesSheetBuilder` u otra strategy genera fórmulas con sintaxis no contemplada (referencias 3D `Hoja1:Hoja3!A5`, names definidos, fórmulas array `{...}`), pueden quedar sin traducir. El comportamiento ante tal fórmula es idempotente respecto a v2.7.0 (la fórmula se queda como estaba), no rompe el libro pero puede dar valores incorrectos. Los patrones contemplados cubren todo lo que las strategies actuales (`COPY`, `FORMULA`, `SUMIFS`, `FORMULA_PLUS_SUMIFS`, `EMPTY`) producen.
+
+### Versión
+
+`pom.xml`, `Main.APP_VERSION` y `MainTest` se mantienen en `2.7.1` (segundo hotfix sobre la misma versión, antes de release pública).
+
+---
+
+## [2.7.1.1] — Hotfix: `Horas_Mes` STRING `"0.00"` no se reconocía como cero
+
+Hotfix sobre 2.7.1. La 2.7.1 dejó pasar un caso real del ERP: la columna `UltimaPrevision_Horas_Mes` viene serializada como **texto formateado** (`"0.00"`, `"20.00"`, `"-"`), no como numérico. La columna `Horas_Mes` de `Resultado` la copia tal cual (es un `COPY`), por lo que también es STRING. El criterio de v2.7.1 sólo reconocía como cero los STRING vacíos o `"-"`; un `"0.00"` se interpretaba como **no cero**, y como el filtro requiere las 5 columnas a 0 simultáneamente, ninguna fila pasaba el filtro: el output era idéntico al de v2.7.0.
+
+### Cambiado
+
+`EmptyRowFilter.isStringZero` extendido: una STRING cuenta como cero si está vacía, es `"-"` (sentinela huérfano) **o parsea numéricamente a `0.0`** con punto o coma decimal — `"0"`, `"0.0"`, `"0.00"`, `"0,00"`, `" 0 "`, etc. Una STRING como `"5.00"` o `"0.5"` **NO** cuenta como cero.
+
+`EmptyRowFilter.apply` ahora ejecuta `FormulaEvaluator.evaluateAll()` una sola vez tras crear el evaluator, antes de iterar las filas. Apache POI en algunos casos falla al evaluar individualmente fórmulas `SUMIFS` cross-sheet en libros recién construidos por timing issues de caché; pre-evaluar en bloque las pre-popula y reduce el riesgo. El error sigue gestionándose vía `try/catch` con fallback "no filtrar nada" (mismo comportamiento que v2.7.1).
+
+### Tests añadidos
+
+- `stringNumericamenteCeroSeConsideraCero`: verifica que `"0"`, `"0.0"`, `"0.00"`, `"0,00"`, `"0,0"`, `" 0.00 "`, `"  0  "` cuentan todos como cero.
+- `stringNumericaNoCeroNoEsCero`: verifica que `"0.5"`, `"5.00"`, `"20.00"`, `"0,5"`, `"-5"`, `"1e-9"`, `"0.0001"` NO cuentan como cero.
+- `ExcelMergerIntegrationTest.setupFixtureWithEmptyRows` actualizado: la fila P-099 ahora tiene `UltimaPrevision_Horas_Mes` como STRING `"0.00"` (replicando el formato real del ERP), no como NUMERIC. Los cinco tests de integración existentes ejercitan ahora el caso real.
+
+### Migración
+
+Ninguna. Es un patch.
+
+### Versión
+
+`pom.xml`, `Main.APP_VERSION` y `MainTest` se mantienen en `2.7.1` (la versión publicada). No bumpeo a `2.7.1.1` porque el formato Maven semver no acepta cuatro segmentos por defecto y porque la 2.7.1 nunca llegó a producción del usuario; este es el primer build entregable de 2.7.1.
+
+---
+
+## [2.7.1] — Filtrado de filas vacías en `Resultado`
+
+Release **patch**. Una sola modificación: las filas de `Resultado` en las que las cinco columnas numéricas (`Jira`, `Facturar`, `PDCL`, `PDCL + Deuda`, `Horas_Mes`) evalúan **todas** a `0` se eliminan **físicamente** del libro de salida. La eliminación es una poda, no `setZeroHeight`: la fila desaparece del XML, los `SUMIFS` del `Resumen` no la suman porque ya no existe, y las pivots de las hojas de responsable no muestran rastro de claves (matrículas, peticiones, responsables) que solo provenían de filas-cero.
+
+Comportamiento por defecto activado. Para volver al de `v2.7.0` basta poner `mes.removeEmptyRows=false` en el `config.properties` (sección Migración).
+
+### Cambiado
+
+**Nueva clave `mes.removeEmptyRows` (default `true`).** Añadida a `config.properties` raíz, al fallback en `src/main/resources/` y a `src/test/resources/test-config.properties`. El default activa el filtrado; el comportamiento de v2.7.0 sigue disponible cambiando la clave a `false`.
+
+**Mecánica del filtrado.** Implementada en una clase nueva `EmptyRowFilter` (paquete `com.excelmerger`, package-private). El método `apply(Workbook, Sheet, int, RunReport)` recorre las filas de `Resultado` ya escritas, evalúa las cinco columnas con `FormulaEvaluator` y compone un set con las filas a eliminar. Después compacta la hoja copiando las filas supervivientes a sus nuevas posiciones — sin `Sheet.shiftRows`, para evitar las interacciones conocidas de POI con merged regions y formato condicional — y elimina el rabo con `Sheet.removeRow`.
+
+Las fórmulas locales con referencia a la propia fila (`{col:Jira}*1.2` se materializa como `J5*1.2`) se reescriben durante la compactación traduciendo el número de fila origen al destino con un transformador textual conservador (`translateLocalRowRefs`): solo modifica patrones tipo `COL+ROWNUM` que no van precedidos de `!` (referencia con prefijo de hoja) ni de un carácter alfanumérico (continuación de identificador), y no toca referencias absolutas (`$J$5`, `J$5`). Las referencias a otras hojas (`Resultado!J5`, `Deuda!$D:$D`) y a cabeceras absolutas se preservan.
+
+**Criterio "vale 0".** Una columna se considera 0 si la celda es `BLANK`, `NUMERIC` con valor exactamente `0.0`, `STRING` vacío (después de `trim`) o `STRING` igual a `"-"` (sentinela escrito en filas huérfanas para columnas sin valor). Cualquier otro valor (`NUMERIC` no-cero, `STRING` con texto, `BOOLEAN`, `ERROR`) cuenta como no-cero y conserva la fila. El criterio es conservador: ante incertidumbre (fórmula con error, `FormulaEvaluator` lanza), la fila se conserva.
+
+**Llamada desde `MesSheetBuilder.build()`.** Tras escribir todas las filas (incluyendo huérfanas) y antes de aplicar formatos condicionales (`applyConditionalFormatting`, `applyRedIfNotEqualTo`) y de escanear `VLOOKUP` para apps sin mapeo (`detectUnmappedVlookupKeys`). Los rangos de los formatos condicionales y el barrido de VLOOKUP cubren ya solo las filas supervivientes; no hay desfase.
+
+**Efecto secundario positivo en `Resumen` y hojas de responsable (sin código añadido).** `SummarySheetBuilder.discoverMatriculas` y `ResponsablesSheetBuilder.scanResultado` se ejecutan **después** de `MesSheetBuilder` y leen `Resultado` por filas físicas. Con el filtrado activo, una matrícula que solo tenía filas-cero **ya no aparece** en `Resumen`, y un responsable cuyas filas eran todas-cero **no genera hoja**. Las pivots `Petición × Matrícula` de cada responsable solo listan claves con datos no-cero. El plan de Fase 0 contemplaba dejar filas-pivot con totales `0` como "visualmente sucio pero correcto matemáticamente"; gracias al orden del pipeline esto **no ocurre**.
+
+**Versión.** `pom.xml`, `Main.APP_VERSION` y `MainTest` actualizados a `2.7.1`. README sin cambios estructurales (sección con la clave nueva en el bloque "Modo Resultado").
+
+### Tests
+
+- `EmptyRowFilterTest` (nuevo, 13 tests): criterio "vale 0" para celdas `BLANK`, `NUMERIC=0`, `NUMERIC≠0`, `STRING ""`, `STRING " "`, `STRING "-"`, `STRING " - "`, `STRING "Sin Matricula"`; traducción de fórmulas locales (`J5*1.2` → `J4*1.2`, multi-referencia `K5+SUMIFS(...A5)` → `K3+SUMIFS(...A3)`, idempotencia con `src==dst`, no-tocar referencias absolutas `J$5` y con prefijo de hoja `Resultado!J5`, no-matchear substrings `AB52`, números grandes `J1234`); aplicación integral con valores literales y con fórmulas.
+- `ExcelMergerIntegrationTest` (cinco tests nuevos): integración end-to-end con un fixture extendido in-memory que añade una fila `P-099` (todas las 5 columnas evaluan a 0) y una fila `P-100` (Jira=Facturar=PDCL=PDCL+Deuda=0 pero `Horas_Mes=2.0`). El fixture se monta abriendo `cierre.xlsx` como bytes en memoria, añadiendo las dos filas y reescribiendo el fichero — los `xlsx` originales en `src/test/resources/fixtures/` no se tocan, manteniendo intactos los 281 tests previos. Los cinco escenarios verificados:
+  - `P-099` se filtra y `P-100` sobrevive cuando `mes.removeEmptyRows=true`.
+  - Con `mes.removeEmptyRows=false` ambas filas siguen presentes (regresión protegida del comportamiento v2.7.0).
+  - El `Resumen` no contiene la matrícula `M-9999` (solo perteneciente a `P-099` filtrada) y sí contiene `M-10000` (de `P-100`); el SUMIFS de Jira para `M-10000` evalúa a `0` con `FormulaEvaluator` (P-100 no tiene imputaciones).
+  - Tras el filtrado, el SUMIFS de Jira en `Resumen` para una matrícula del fixture base (`M-1001`) coincide exactamente con la suma manual de las celdas Jira de `Resultado` para esa matrícula evaluadas con `FormulaEvaluator`. Esto verifica que la compactación y la traducción de referencias no han dejado valores fantasma ni referencias rotas (regla inquebrantable 4).
+  - En modo `completo`, el responsable `trespFiltro@x` (única fila era `P-099`, filtrada) **no genera hoja**; el responsable `trespResta@x` (fila `P-100`, no filtrada) sí.
+- `MainTest`: `assertThat(Main.APP_VERSION).isEqualTo("2.7.1")` actualizado.
+
+### Migración
+
+Si necesitas el comportamiento de v2.7.0 (no eliminar filas):
+
+```
+mes.removeEmptyRows=false
+```
+
+en tu `config.properties`. Sin esa clave, el default es `true` y las filas con las 5 columnas a 0 se eliminan.
+
+**Sin alias retrocompatibles.** Si la clave `mes.removeEmptyRows` no se encuentra, se asume `true` (el caso "config viejo se beneficia automáticamente" — la mejora se considera deseable por defecto). Si está presente con un valor que no sea `true`/`false` válido para `Boolean.parseBoolean`, se interpreta como `false` (silencioso, igual que el resto de booleanos del config).
+
+### Riesgos conocidos y limitaciones
+
+1. **Fórmulas exóticas en `mes.col.N.formula`** que usen sintaxis no contemplada por `translateLocalRowRefs` quedarán sin traducir tras la compactación. La heurística está calibrada para los patrones que `MesSheetBuilder` y las strategies generan en práctica (`{col:X}*K`, `{col:X}+{col:Y}`, `IFERROR(VLOOKUP(...))`, `{col:X}+SUMIFS(...)`); cualquier fórmula que se introduzca en el futuro y use referencias de fila local debe verificarse con un test que compare evaluación pre y post filtrado. Como mitigación, si la traducción no acierta el comportamiento es **conservador** — la fórmula se queda apuntando al número de fila Excel original, lo cual en POI XSSF tras la reescritura de la celda da valor predecible (no rompe el libro, pero puede dar valor incorrecto). El test `v271TotalesResumenCoincidenConSumaManualTrasFiltrado` cubre el caso real con las fórmulas actuales.
+2. **Filas huérfanas**: si una fila huérfana tuviera `orphanHours=0` (escenario teórico), sus 5 columnas serían 0 y se filtraría. En la práctica `collectOrphans` solo crea entradas para parejas con horas imputadas, así que `orphanHours>0` siempre y la fila huérfana nunca se filtra.
+3. **Apache POI `removeRow` + `createRow` en la misma posición**: secuencia segura en POI 5.2.5 (versión del proyecto). Cualquier upgrade a POI 6.x debe re-validar este flujo; en particular el comportamiento ante celdas con shared formulas o merged regions, ninguno de los cuales aparece en `Resultado` actualmente.
+
+---
+
+## [2.7.0] — Freeze top row, `Horas_Mes` desde otra fuente, pivots de responsable invertidas (Jira→PDCL)
+
+Release minor. **Hay cambios visibles en el output y dos rupturas de compatibilidad en `config.properties`** que requieren acción del usuario al actualizar; ver "Migración" más abajo. La compatibilidad se rompe a propósito en una clave (`facturarTitle` → `pdclTitle`) y en el nombre/fuente de una columna calculada (`Realizadas_Horas_Mes` → `Horas_Mes` desde otra cabecera). Configs antiguos son **rechazados con error explícito**, sin alias.
+
+Tres modificaciones independientes:
+
+1. **Modif 1** — Por defecto, todas las hojas visibles del libro de salida se generan con freeze de la primera fila (cabeceras congeladas al hacer scroll). Las hojas ocultas (`Equipos`) y las hojas de responsable están exentas. Opt-out con `output.freezeTopRow=false`.
+2. **Modif 2** — La columna que en v2.6.0 era `Realizadas_Horas_Mes` (COPY desde `Cierre.Realizadas_Horas_Mes`) se renombra a `Horas_Mes` y cambia su fuente a `Cierre.UltimaPrevision_Horas_Mes`. Motivación: en el ERP real `Realizadas_Horas_Mes` venía siempre a `0.00` (diagnosticado en v2.6.0 Modif 2 como realidad del export, no bug); el dato útil estaba en `UltimaPrevision_Horas_Mes`, que ya formaba parte del perfil Cierre.
+3. **Modif 3** — En las hojas de responsable, las dos pivots se invierten y la fuente de la primera cambia. Antes: `(1) Jira por Petición × Matrícula`, `(2) Facturar por Petición × Matrícula`. Ahora: `(1) PDCL por Petición × Matrícula`, `(2) Horas imputadas (Jira) por Petición × Matrícula`. La columna leída por la primera pivot pasa de `Facturar` (`mes.col.11`, fórmula `{col:Jira}*1.2`) a `PDCL` (`mes.col.12`, fórmula `{col:Jira}*1.2`); el valor numérico es idéntico para datos sintéticos, pero la columna fuente y el nombre visible cambian.
+
+### Cambiado
+
+**Modif 1 — `output.freezeTopRow` (nueva clave, default `true`).** En `config.properties` raíz y fallback se añade la clave con su comentario. La aplicación del freeze se hace al final de `ExcelMerger.merge()`, después de que todos los builders hayan poblado el libro y justo antes de la escritura, en un método nuevo `applyFreezeTopRow(Workbook, List<String>)` que itera `workbook.getNumberOfSheets()` saltando hojas ocultas (`isSheetHidden` / `isSheetVeryHidden`) y las hojas de responsable (recibidas como lista de nombres del `ResponsablesSheetBuilder`).
+
+Para que el paso de freeze sepa qué hojas excluir, `ResponsablesSheetBuilder.buildAll(Workbook)` cambia su firma de `void` a `List<String>` (devuelve los nombres de las hojas creadas en el orden de creación). Los call-sites existentes en tests no se rompen — Java permite ignorar el valor de retorno.
+
+Decisión de diseño (Fase 0 P1): **las hojas de responsable no reciben freeze**. Su row 1 contiene el nombre del responsable como cabecera A1 grande, no una cabecera tipo tabla; congelarla al hacer scroll dejaría únicamente el nombre del responsable visible, lo cual no aporta. Este criterio se documenta en el javadoc de `applyFreezeTopRow`.
+
+**Modif 2 — `mes.col.15` ahora es `Horas_Mes` desde `UltimaPrevision_Horas_Mes`.** En los tres `config.properties` (raíz, fallback, test) la entrada pasa de:
+
+```
+mes.col.15.name=Realizadas_Horas_Mes
+mes.col.15.type=COPY
+mes.col.15.from=Realizadas_Horas_Mes
+```
+
+a:
+
+```
+mes.col.15.name=Horas_Mes
+mes.col.15.type=COPY
+mes.col.15.from=UltimaPrevision_Horas_Mes
+```
+
+`profile.Cierre.detect.headers` ya incluía `UltimaPrevision_Horas_Mes` desde 2.0.0; el perfil no se toca. Es un cambio config-only — `CopyColumnStrategy` no necesita modificaciones.
+
+El test de integración `v260RealizadasHorasMesCopiaTalCualDesdeCierre` se reemplaza por `v270HorasMesCopiaDesdeUltimaPrevisionHorasMes`, que verifica (a) la presencia de la columna `Horas_Mes` en `Resultado`, (b) la ausencia de `Realizadas_Horas_Mes` (rename del nombre visible), y (c) que los valores coinciden con `Cierre.UltimaPrevision_Horas_Mes` usando 5 peticiones del fixture cuyos pares (UltimaPrevision, Realizadas) son diferenciables — un fallback al origen antiguo fallaría 4 de 5.
+
+**Modif 3 — pivots de responsable invertidas, fuente Facturar→PDCL.** Lugares afectados:
+
+- En los tres `config.properties` (raíz, fallback, test) la clave `responsables.tables.facturarTitle` se renombra a `responsables.tables.pdclTitle` y su valor por defecto pasa de `Facturar por Petición × Matrícula` a `PDCL por Petición × Matrícula`. El orden de las dos claves se invierte en el fichero (primero `pdclTitle`, luego `jiraTitle`) para reflejar el orden de las tablas en el output.
+- En `ResponsablesSheetBuilder`: constante `COL_FACTURAR` eliminada, `COL_PDCL = "PDCL"` introducida; default `DEFAULT_FACTURAR_TITLE` → `DEFAULT_PDCL_TITLE`; campo `ColumnLetters.facturar` → `ColumnLetters.pdcl`. `resolveColumnLetters` busca `PDCL` en lugar de `Facturar`. `writePivots` invierte el orden de escritura: primera tabla = PDCL en row 2 (0-based), segunda tabla = Jira tras gap. La fórmula `{col:Jira}*1.2` (de `mes.col.12`) ya producía la columna PDCL — no hay cambios en `MesSheetBuilder`.
+- En `ResponsablesTablesConfigSection` (validador): la antigua validación de `facturarTitle` se sustituye por `pdclTitle`, y se añade **fail-fast explícito** para las dos claves obsoletas:
+  - `responsables.tables.facturarTitle` (v2.4.0..v2.6.0) → error con mensaje de migración a `pdclTitle`.
+  - `responsables.tables.realTitle` (≤v2.5.1) → error con mensaje de migración a `pdclTitle`, mencionando el camino `REAL → Facturar (v2.6.0) → PDCL (v2.7.0)`.
+- En tests: `ResponsablesSheetBuilderV24Test` reescrito para reflejar el nuevo orden y la cabecera `PDCL` en lugar de `Facturar` en el fixture; `ResponsablePivotBuilderTest` actualiza el literal `Facturar` → `PDCL` y `LETTER_FACTURAR` → `LETTER_PDCL`; `ConfigValidatorTest` reemplaza `responsablesTablesFacturarTitleVacioDevuelveError` por `responsablesTablesPdclTitleVacioDevuelveError` y añade los dos tests de fail-fast (`...FacturarTitleObsoletaEnV270...`, `...RealTitleObsoletaEnV270...`); `ExcelMergerIntegrationTest` actualiza tres tests existentes (`v240ResponsablesGeneraDosTablasPivotPorHoja`, `v240CompletoTieneResumenYTablasPivotEnHojasResponsable`, `v240ResponsablesFormulaEvaluatorSumifsCoincideConSumaManual`) para asertar el nuevo orden y, en el último, localizar P-001 en la **segunda tabla** (Jira) tras saltar la primera (PDCL).
+
+Casos NO modificados (a propósito):
+
+- La columna `Facturar` de `Resultado` (`mes.col.11`) **se mantiene**. Modif 3 solo afecta a qué columna lee la primera pivot de las hojas de responsable.
+- `summary.valueColumns=Jira,Facturar,PDCL,PDCL + Deuda` no se toca: la hoja Resumen sigue mostrando `Facturar` como una de sus 4 columnas de valor.
+- `summary.byResponsible.valueColumn=PDCL` ya usaba `PDCL` desde v2.4.0; no requiere cambios.
+
+### Añadido
+
+- Tests de `Modif 1`: `v270FreezeTopRowAplicaATodasLasHojasVisiblesEnModoCompleto`, `v270FreezeTopRowNoSeAplicaAHojaOcultaEquipos`, `v270FreezeTopRowNoSeAplicaAHojasDeResponsable`, `v270FreezeTopRowOptOutDejaTodasLasHojasSinFreeze` en `ExcelMergerIntegrationTest`.
+- `TestFixtures.buildRealisticConfigWithOutputModeAndFreeze(Path, String, boolean)` y un helper privado genérico `overrideKey` para sobreescribir cualquier clave del config renderizado en tests (refactor: `overrideOutputMode` ahora delega en `overrideKey`).
+
+### Migración
+
+Esta versión introduce dos rupturas de compatibilidad en `config.properties` y un cambio en el nombre de cabecera de una columna del output. Los configs antiguos son **rechazados con error explícito**, sin alias retrocompatibles. Pasos:
+
+1. **Si tienes `responsables.tables.facturarTitle` en tu `config.properties`**: renómbrala a `responsables.tables.pdclTitle` y, opcionalmente, ajusta el valor (la pivot ahora suma PDCL, no Facturar — el título por defecto es `PDCL por Petición × Matrícula`). El validador aborta con error si encuentra la clave antigua.
+
+2. **Si tienes `responsables.tables.realTitle`** (config muy antiguo, ≤v2.5.1): mismo paso — renombrar a `pdclTitle`. El validador también aborta con error explícito en este caso.
+
+3. **Si tu `config.properties` define `mes.col.15`** (cosa rara — los configs no se suelen tocar a este nivel): cambia la entrada al nuevo contrato:
+
+   ```
+   mes.col.15.name=Horas_Mes
+   mes.col.15.type=COPY
+   mes.col.15.from=UltimaPrevision_Horas_Mes
+   ```
+
+   Si no defines `mes.col.15` y dependes del fallback de `src/main/resources/config.properties`, no hay nada que hacer — la actualización del binario incorpora el nuevo contrato.
+
+4. **`output.freezeTopRow`**: clave nueva, opt-out. Si quieres preservar el comportamiento ≤2.6.0 (sin freeze en ninguna hoja), añade `output.freezeTopRow=false` a tu config. El default es `true`.
+
+5. **Cambio visible en el output sin acción de tu parte**: la columna que en v2.6.0 se llamaba `Realizadas_Horas_Mes` ahora se llama `Horas_Mes` y trae los valores de `UltimaPrevision_Horas_Mes`. Si tienes scripts/macros downstream que buscan la cabecera `Realizadas_Horas_Mes`, actualízalos. El orden de las pivots en hojas de responsable también cambia (PDCL primero, Jira segunda); idem si lo automatizas.
+
+### Tests
+
+275 tests verdes (continúa el contrato de la línea base 2.6.0). Los nuevos tests de Modif 1 + 3 se acomodan en los counts existentes: la suite de integración crece en cuatro tests de freeze, y `ConfigValidatorTest` crece en dos tests de fail-fast (uno reemplaza el viejo `...FacturarTitleVacio...`, neto +2). Los 19 tests existentes de Responsables se reescriben en sitio para reflejar el nuevo orden — sin nuevos métodos.
+
+Build hardening de v2.6.0 (Spotless, SpotBugs Medium, PMD, Checkstyle, git-commit-id) intacto: la implementación no introduce supresiones nuevas.
+
+---
+
 ## [2.6.0] — Rename REAL→Facturar, fuente nueva en `Horas_RealizadoTot`, diagnóstico de columna 0
 
 Release minor. **Hay cambios visibles en el output y en `config.properties`** que requieren acción del usuario al actualizar; ver "Migración" más abajo. La compatibilidad de `config.properties` se rompe a propósito en dos claves cosméticas; los reportes Excel generados quedan funcionalmente equivalentes salvo por el nombre de cabecera renombrado y la nueva fuente de una columna.

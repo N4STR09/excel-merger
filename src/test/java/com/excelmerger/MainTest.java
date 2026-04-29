@@ -135,6 +135,32 @@ class MainTest {
         //        realidad del ERP, no bug del programa (Modif 2). Sin alias
         //        retrocompatibles: configs antiguos requieren actualizacion
         //        manual (ver seccion Migracion en CHANGELOG [2.6.0]).
-        assertThat(Main.APP_VERSION).isEqualTo("2.6.0");
+        // 2.7.0: tres modificaciones independientes:
+        //        Modif 1 — freeze de la primera fila en el output, opt-out
+        //        con output.freezeTopRow=false. Excluye Equipos (oculta) y
+        //        las hojas de responsable (Fase 0 P1).
+        //        Modif 2 — rename de mes.col.15: ahora Horas_Mes desde
+        //        Cierre.UltimaPrevision_Horas_Mes (antes Realizadas_Horas_Mes
+        //        desde Realizadas_Horas_Mes; el ERP real rellena la columna
+        //        antigua con 0 en el 100% de las filas).
+        //        Modif 3 — orden invertido de las pivots en hojas de
+        //        responsable: ahora primera tabla = PDCL, segunda = Jira
+        //        (antes: Jira primero, Facturar segunda). La fuente de la
+        //        primera pivot pasa de la columna Facturar (mes.col.11) a
+        //        PDCL (mes.col.12). Rename limpio de la clave config:
+        //        responsables.tables.facturarTitle -> .pdclTitle. Configs
+        //        con la clave antigua (o realTitle de ≤v2.5.1) son
+        //        rechazados con error de migracion.
+        //        Sin alias retrocompatibles: ver CHANGELOG [2.7.0] seccion
+        //        Migracion.
+        // 2.7.1: filtrado fisico de filas con las 5 columnas (Jira, Facturar,
+        //        PDCL, PDCL + Deuda, Horas_Mes) evaluadas TODAS a 0. Nueva
+        //        clave mes.removeEmptyRows=true (default). Si se pone a
+        //        false, comportamiento identico al de v2.7.0. Implementacion
+        //        post-build con FormulaEvaluator (regla inquebrantable 4).
+        //        Efecto secundario positivo: Resumen y pivots de responsable
+        //        no muestran filas con totales 0 porque sus claves descubren
+        //        a partir de las filas FISICAS de Resultado, ya filtrado.
+        assertThat(Main.APP_VERSION).isEqualTo("2.7.1");
     }
 }

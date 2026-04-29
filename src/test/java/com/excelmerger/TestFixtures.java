@@ -124,11 +124,65 @@ public final class TestFixtures {
         return new ConfigLoader(cfg.toString());
     }
 
+    /**
+     * v2.7.0 (Modif 1): variante de {@link #buildRealisticConfigWithOutputMode(Path, String)}
+     * que ademas sobreescribe la clave {@code output.freezeTopRow}. Util para
+     * tests del opt-out del freeze top row.
+     */
+    public static ConfigLoader buildRealisticConfigWithOutputModeAndFreeze(
+            Path baseDir, String mode, boolean freezeTopRow) throws IOException {
+        Path inputDir = baseDir.resolve("input");
+        Path outputFile = baseDir.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        copyFixturesTo(inputDir);
+        Path cfg = renderTestConfig(baseDir.resolve("test-config.properties"), inputDir, outputFile);
+        overrideOutputMode(cfg, mode);
+        overrideKey(cfg, "output.freezeTopRow", String.valueOf(freezeTopRow));
+        return new ConfigLoader(cfg.toString());
+    }
+
+    /**
+     * v2.7.0: variante general de {@link #buildRealisticConfigWithOutputMode(Path, String)}
+     * que ademas aplica un mapa de overrides arbitrarios sobre el config
+     * renderizado. Util para tests que necesitan tocar claves no cubiertas
+     * por los helpers especificos (por ejemplo {@code lookup.Equipos.hidden}
+     * para forzar la hoja oculta en el test-config — donde por defecto es
+     * {@code false}).
+     *
+     * <p>Las claves se aplican en orden de iteracion del mapa. Para resultados
+     * deterministas pasa un {@link java.util.LinkedHashMap}.</p>
+     */
+    public static ConfigLoader buildRealisticConfigWithOverrides(
+            Path baseDir, String mode, java.util.Map<String, String> overrides) throws IOException {
+        Path inputDir = baseDir.resolve("input");
+        Path outputFile = baseDir.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        copyFixturesTo(inputDir);
+        Path cfg = renderTestConfig(baseDir.resolve("test-config.properties"), inputDir, outputFile);
+        overrideOutputMode(cfg, mode);
+        for (java.util.Map.Entry<String, String> e : overrides.entrySet()) {
+            overrideKey(cfg, e.getKey(), e.getValue());
+        }
+        return new ConfigLoader(cfg.toString());
+    }
+
     private static void overrideOutputMode(Path cfg, String mode) throws IOException {
+        overrideKey(cfg, "output.mode", mode);
+    }
+
+    /**
+     * v2.7.0: helper generico que sustituye o anade una clave del fichero de
+     * configuracion ya renderizado. Ortogonal a {@link #overrideOutputMode}
+     * para evitar duplicacion. La clave se compara en regex con anclas para
+     * que coincida solo con la linea exacta {@code &lt;key&gt;=...}.
+     */
+    private static void overrideKey(Path cfg, String key, String value) throws IOException {
         String content = Files.readString(cfg, StandardCharsets.UTF_8);
+        String escapedKey = java.util.regex.Pattern.quote(key);
         java.util.regex.Pattern p =
-                java.util.regex.Pattern.compile("^output\\.mode=.*$", java.util.regex.Pattern.MULTILINE);
-        String replacement = "output.mode=" + mode;
+                java.util.regex.Pattern.compile("^" + escapedKey + "=.*$",
+                        java.util.regex.Pattern.MULTILINE);
+        String replacement = key + "=" + value;
         if (p.matcher(content).find()) {
             content = p.matcher(content).replaceAll(java.util.regex.Matcher.quoteReplacement(replacement));
         } else {

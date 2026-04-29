@@ -697,12 +697,40 @@ class ConfigValidatorTest {
     }
 
     @Test
-    void responsablesTablesFacturarTitleVacioDevuelveError() {
+    void responsablesTablesPdclTitleVacioDevuelveError() {
+        // v2.7.0 (Modif 3): clave nueva pdclTitle (rename de facturarTitle).
         Properties p = minimalValid();
-        p.setProperty("responsables.tables.facturarTitle", "");
+        p.setProperty("responsables.tables.pdclTitle", "");
+        assertThat(validatorFor(p).validate())
+                .anyMatch(s -> s.contains("responsables.tables.pdclTitle")
+                        && s.contains("no puede estar vacio"));
+    }
+
+    @Test
+    void responsablesTablesFacturarTitleObsoletaEnV270DevuelveError() {
+        // v2.7.0 (Modif 3): la clave facturarTitle (v2.4.0..v2.6.0) se renombro
+        // a pdclTitle. Sin alias retrocompat: la presencia de la clave vieja —
+        // con cualquier valor — produce error de migracion explicito.
+        Properties p = minimalValid();
+        p.setProperty("responsables.tables.facturarTitle",
+                "Facturar por Petición × Matrícula");
         assertThat(validatorFor(p).validate())
                 .anyMatch(s -> s.contains("responsables.tables.facturarTitle")
-                        && s.contains("no puede estar vacio"));
+                        && s.contains("obsoleta")
+                        && s.contains("pdclTitle"));
+    }
+
+    @Test
+    void responsablesTablesRealTitleObsoletaEnV270DevuelveError() {
+        // v2.7.0 (Modif 3): realTitle (≤v2.5.1) tambien obsoleta. El usuario
+        // que actualice desde una version muy antigua debe migrar a pdclTitle
+        // — el mensaje lo indica.
+        Properties p = minimalValid();
+        p.setProperty("responsables.tables.realTitle", "REAL por Petición × Matrícula");
+        assertThat(validatorFor(p).validate())
+                .anyMatch(s -> s.contains("responsables.tables.realTitle")
+                        && s.contains("obsoleta")
+                        && s.contains("pdclTitle"));
     }
 
     @Test

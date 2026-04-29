@@ -224,6 +224,26 @@ public class MesSheetBuilder {
             }
         }
 
+        // --- v2.7.1: Filtrar filas con las 5 columnas (Jira, Facturar,
+        //     PDCL, PDCL + Deuda, Horas_Mes) evaluando todas a 0. La
+        //     eliminacion es FISICA (no setZeroHeight). Se hace antes de
+        //     aplicar los formatos condicionales para que sus rangos
+        //     cubran solo las filas supervivientes y para que detectar
+        //     VLOOKUP huerfanos no escanee filas inexistentes. Los
+        //     SUMIFS de Resumen y las pivots de responsable se ajustan
+        //     solos porque sus rangos referencian Resultado por columna
+        //     completa o por rango acotado, y porque Summary y
+        //     Responsables descubren matriculas/responsables a partir
+        //     de las filas FISICAS de Resultado: las claves que solo
+        //     tenian filas-cero ya no apareceran. ---
+        boolean removeEmpty = config.getBoolean("mes.removeEmptyRows", true);
+        if (removeEmpty) {
+            int removed = EmptyRowFilter.apply(workbook, mes, mesRowIdx, report);
+            if (removed > 0) {
+                mesRowIdx -= removed;
+            }
+        }
+
         // --- Formato condicional: verde si >= 0 ---
         applyConditionalFormatting(mes, columns, mesRowIdx);
 

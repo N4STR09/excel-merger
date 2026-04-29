@@ -1983,11 +1983,22 @@ class ExcelMergerIntegrationTest {
 
     /**
      * En modo {@code responsables}, cada hoja de responsable debe contener
-     * dos tablas pivot SUMIFS (Jira y Facturar) apiladas verticalmente, ademas
-     * de la cabecera A1 (v2.3.0).
+     * dos tablas pivot SUMIFS apiladas verticalmente, ademas de la cabecera
+     * A1 (v2.3.0).
      *
-     * <p>Verifica la estructura: titulo Jira, cabecera con matriculas,
-     * datos, totales, gap, titulo Facturar, cabecera, datos, totales.</p>
+     * <p><b>v2.7.0 (Modif 3)</b>: el orden de las tablas se ha invertido y
+     * la fuente de la primera tabla ha cambiado:</p>
+     * <ul>
+     *   <li>Primera tabla = PDCL (antes: Jira).</li>
+     *   <li>Segunda tabla = Jira (antes: Facturar).</li>
+     *   <li>La columna fuente de la primera pivot pasa de Facturar
+     *       (mes.col.11 = {@code {col:Jira}*1.2}) a PDCL
+     *       (mes.col.12 = {@code {col:Jira}*1.2}). Mismos valores
+     *       numericos pero columna distinta.</li>
+     * </ul>
+     *
+     * <p>Verifica la estructura: titulo PDCL, cabecera con matriculas, datos,
+     * totales, gap, titulo Jira, cabecera, datos, totales.</p>
      */
     @Test
     void v240ResponsablesGeneraDosTablasPivotPorHoja(@TempDir Path tmp) throws IOException {
@@ -2004,30 +2015,44 @@ class ExcelMergerIntegrationTest {
             // Cabecera A1
             assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("tresp1@x");
 
+            // v2.7.0 (Modif 3): primera tabla = PDCL.
             // Titulo de la primera tabla en row 2 (0-based)
             String title1 = sheet.getRow(2).getCell(0).getStringCellValue();
-            assertThat(title1).as("titulo tabla Jira").contains("Jira");
+            assertThat(title1).as("titulo primera tabla v2.7.0 = PDCL").contains("PDCL");
+            assertThat(title1).as("primera tabla NO contiene 'Jira'").doesNotContain("Jira");
 
-            // La cabecera de la tabla Jira debe estar en row 3 con "Petición"
+            // La cabecera de la tabla PDCL debe estar en row 3 con "Petición"
             // como primer encabezado.
             assertThat(sheet.getRow(3).getCell(0).getStringCellValue()).isEqualTo("Petición");
 
-            // Hay una segunda tabla en algún punto más abajo cuyo título
-            // contiene "Facturar". La buscamos sin asumir índice exacto.
-            int facturarTitleRow = -1;
+            // v2.7.0 (Modif 3): la SEGUNDA tabla es ahora Jira (antes Facturar).
+            // Buscamos sin asumir indice exacto.
+            int jiraTitleRow = -1;
             for (int r = 4; r <= sheet.getLastRowNum(); r++) {
                 Row row = sheet.getRow(r);
                 if (row == null) continue;
                 Cell c0 = row.getCell(0);
                 if (c0 == null) continue;
                 if (c0.getCellType() == CellType.STRING
-                        && c0.getStringCellValue().contains("Facturar")
+                        && c0.getStringCellValue().contains("Jira")
                         && c0.getStringCellValue().contains("Petición")) {
-                    facturarTitleRow = r;
+                    jiraTitleRow = r;
                     break;
                 }
             }
-            assertThat(facturarTitleRow).as("titulo tabla Facturar encontrado").isPositive();
+            assertThat(jiraTitleRow).as("titulo segunda tabla Jira encontrado").isPositive();
+
+            // Verificacion explicita: ningun titulo en la hoja debe contener
+            // "Facturar" — la pivot ya no se construye sobre esa columna.
+            for (int r = 0; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null || c0.getCellType() != CellType.STRING) continue;
+                assertThat(c0.getStringCellValue())
+                        .as("ninguna celda de hoja de responsable debe mencionar 'Facturar' (v2.7.0)")
+                        .doesNotContain("Facturar");
+            }
         }
     }
 
@@ -2040,12 +2065,18 @@ class ExcelMergerIntegrationTest {
      * con Horas_RealizadoTot=12. Es la única ocurrencia de esa combinación
      * para tresp1@x.</p>
      *
-     * <p>Como Jira y Facturar en Resultado se calculan a partir de cruces, el
+     * <p>Como Jira y PDCL en Resultado se calculan a partir de cruces, el
      * valor exacto depende del fixture. Para no acoplarse a aritmética
      * exacta, este test verifica únicamente: (a) que el SUMIFS evalúa sin
      * error, (b) que el valor es no negativo, (c) que coincide con la
      * suma manual de las celdas correspondientes en Resultado filtradas
      * por responsable=tresp1@x, peticion=P-001, matricula=M-1001.</p>
+     *
+     * <p><b>v2.7.0 (Modif 3)</b>: el orden de las pivots se invirtió.
+     * Ahora la primera tabla es PDCL y la segunda es Jira. Este test sigue
+     * comparando contra la columna {@code Jira} de Resultado, asi que busca
+     * P-001 en la <b>segunda tabla</b> (la de Jira), que vive más abajo en
+     * la hoja tras la pivot de PDCL + el gap.</p>
      */
     @Test
     void v240ResponsablesFormulaEvaluatorSumifsCoincideConSumaManual(@TempDir Path tmp)
@@ -2094,12 +2125,28 @@ class ExcelMergerIntegrationTest {
                 }
             }
 
-            // Localizar P-001 en la tabla Jira de tresp1@x y leer la
-            // columna M-1001. Buscamos el row donde A.value == "P-001"
-            // entre las filas de la primera pivot (que empieza en row 2
-            // con titulo + cabecera + datos). La cabecera de matriculas
-            // está en row 3.
-            Row matrHeaderRow = sheet.getRow(3);
+            // v2.7.0 (Modif 3): localizar la SEGUNDA tabla (Jira) buscando
+            // su titulo. La primera tabla es ahora PDCL; saltamos su zona
+            // antes de iniciar la busqueda. La cabecera de matriculas de la
+            // segunda tabla esta en la fila inmediatamente posterior al
+            // titulo.
+            int jiraTitleRow = -1;
+            for (int r = 4; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                Cell c0 = row.getCell(0);
+                if (c0 == null || c0.getCellType() != CellType.STRING) continue;
+                String s = c0.getStringCellValue();
+                if (s.contains("Jira") && s.contains("Petición")) {
+                    jiraTitleRow = r;
+                    break;
+                }
+            }
+            assertThat(jiraTitleRow).as("titulo segunda tabla (Jira) en hoja responsable").isPositive();
+
+            // La cabecera de matriculas de la tabla Jira esta en la fila
+            // siguiente al titulo.
+            Row matrHeaderRow = sheet.getRow(jiraTitleRow + 1);
             int m1001Col = -1;
             for (int c = 1; c < matrHeaderRow.getLastCellNum(); c++) {
                 Cell hc = matrHeaderRow.getCell(c);
@@ -2111,12 +2158,12 @@ class ExcelMergerIntegrationTest {
             assertThat(m1001Col).as("columna M-1001 en tabla Jira").isPositive();
 
             int p001Row = -1;
-            for (int r = 4; r <= sheet.getLastRowNum(); r++) {
+            for (int r = jiraTitleRow + 2; r <= sheet.getLastRowNum(); r++) {
                 Row row = sheet.getRow(r);
                 if (row == null) continue;
                 Cell c0 = row.getCell(0);
                 if (c0 == null) continue;
-                // Parar al llegar al "Total" o a la fila de gap
+                // Parar al llegar al "Total"
                 if (c0.getCellType() == CellType.STRING
                         && "Total".equals(c0.getStringCellValue())) {
                     break;
@@ -2132,7 +2179,7 @@ class ExcelMergerIntegrationTest {
             CellValue pivotValue = ev.evaluate(sheet.getRow(p001Row).getCell(m1001Col));
             assertThat(pivotValue.getCellType()).isEqualTo(CellType.NUMERIC);
             assertThat(pivotValue.getNumberValue())
-                    .as("SUMIFS pivot tresp1@x P-001 x M-1001 == suma manual")
+                    .as("SUMIFS pivot Jira tresp1@x P-001 x M-1001 == suma manual")
                     .isEqualTo(manualSum);
         }
     }
@@ -2166,6 +2213,9 @@ class ExcelMergerIntegrationTest {
     /**
      * En modo {@code completo}, las hojas de responsable también deben tener
      * sus dos tablas pivot, sin afectar a la generación de Resumen.
+     *
+     * <p>v2.7.0 (Modif 3): orden invertido — primera tabla = PDCL,
+     * segunda = Jira.</p>
      */
     @Test
     void v240CompletoTieneResumenYTablasPivotEnHojasResponsable(@TempDir Path tmp)
@@ -2182,24 +2232,25 @@ class ExcelMergerIntegrationTest {
             Sheet sheet = wb.getSheet("tresp1@x");
             assertThat(sheet).as("hoja tresp1@x").isNotNull();
 
-            // Verifica presencia de las dos pivots: titulo Jira y titulo Facturar.
+            // v2.7.0 (Modif 3): primera tabla = PDCL, segunda = Jira.
             String title1 = sheet.getRow(2).getCell(0).getStringCellValue();
-            assertThat(title1).contains("Jira");
+            assertThat(title1).as("titulo primera tabla v2.7.0 = PDCL").contains("PDCL");
+            assertThat(title1).as("primera tabla NO contiene 'Jira'").doesNotContain("Jira");
 
-            // Buscar el segundo titulo más abajo con "Facturar"
-            boolean foundFacturar = false;
+            // Buscar el segundo titulo más abajo con "Jira"
+            boolean foundJira = false;
             for (int r = 4; r <= sheet.getLastRowNum(); r++) {
                 Row row = sheet.getRow(r);
                 if (row == null) continue;
                 Cell c0 = row.getCell(0);
                 if (c0 == null || c0.getCellType() != CellType.STRING) continue;
-                if (c0.getStringCellValue().contains("Facturar")
+                if (c0.getStringCellValue().contains("Jira")
                         && c0.getStringCellValue().contains("Petición")) {
-                    foundFacturar = true;
+                    foundJira = true;
                     break;
                 }
             }
-            assertThat(foundFacturar).as("segunda tabla Facturar en hoja de responsable").isTrue();
+            assertThat(foundJira).as("segunda tabla Jira en hoja de responsable v2.7.0").isTrue();
         }
     }
 
@@ -2344,24 +2395,34 @@ class ExcelMergerIntegrationTest {
     }
 
     // ==================================================================
-    //  v2.6.0 — Modif 2: la columna Realizadas_Horas_Mes copia tal cual
-    //           desde Cierre, sea cero o no.
+    //  v2.7.0 — Modif 2: la columna Horas_Mes copia tal cual desde
+    //           Cierre.UltimaPrevision_Horas_Mes (sustituye al test v2.6.0
+    //           que validaba Realizadas_Horas_Mes ← Realizadas_Horas_Mes).
     // ==================================================================
 
     /**
-     * v2.6.0 (Modif 2): el diagnóstico de v2.6.0 concluyó que NO hay bug en
-     * {@code CopyColumnStrategy}: la columna {@code Realizadas_Horas_Mes} sale
-     * toda a 0 en el output del usuario porque su ERP rellena esa columna con
-     * "0.00" en el 100% de las 832 filas del export real. Es realidad del ERP,
-     * no bug del programa.
+     * v2.7.0 (Modif 2): la columna que en v2.6.0 era {@code Realizadas_Horas_Mes}
+     * (COPY de {@code Cierre.Realizadas_Horas_Mes}) se reemplaza por
+     * {@code Horas_Mes} (COPY de {@code Cierre.UltimaPrevision_Horas_Mes}).
+     * Motivacion: el ERP real rellena {@code Realizadas_Horas_Mes} con 0.00 en
+     * el 100% de las filas; el dato util esta en {@code UltimaPrevision_Horas_Mes}.
      *
-     * <p>Este test ancla el contrato: la columna de Resultado debe coincidir
-     * celda a celda con la columna correspondiente de Cierre, sea el valor
-     * cero o no. El fixture sintético tiene ambos casos (P-001=5, P-003=0,
-     * P-002=15, etc.).</p>
+     * <p>Este test ancla el nuevo contrato:
+     * <ol>
+     *   <li>La columna {@code Horas_Mes} existe en Resultado.</li>
+     *   <li>Sus valores coinciden celda a celda con
+     *       {@code Cierre.UltimaPrevision_Horas_Mes} (no con
+     *       {@code Cierre.Realizadas_Horas_Mes}).</li>
+     *   <li>La columna vieja {@code Realizadas_Horas_Mes} ya NO esta en Resultado
+     *       (el rename del nombre visible es parte del contrato).</li>
+     * </ol>
+     *
+     * <p>Los valores esperados se eligen de modo que sean diferenciables
+     * entre las dos columnas de Cierre — verifica que la fuente cambio
+     * efectivamente, no que los valores casualmente coinciden.</p>
      */
     @Test
-    void v260RealizadasHorasMesCopiaTalCualDesdeCierre(@TempDir Path tmp)
+    void v270HorasMesCopiaDesdeUltimaPrevisionHorasMes(@TempDir Path tmp)
             throws IOException {
         ConfigLoader cfg = TestFixtures.buildRealisticConfig(tmp);
         new ExcelMerger(cfg, new RunReport()).merge();
@@ -2374,24 +2435,30 @@ class ExcelMergerIntegrationTest {
             assertThat(resultado).as("hoja Resultado").isNotNull();
 
             int colPet = findHeaderIndex(resultado, "Petición");
-            int colRHM = findHeaderIndex(resultado, "Realizadas_Horas_Mes");
+            int colHM = findHeaderIndex(resultado, "Horas_Mes");
             assertThat(colPet).as("col Petición").isNotNegative();
-            assertThat(colRHM).as("col Realizadas_Horas_Mes").isNotNegative();
+            assertThat(colHM).as("col Horas_Mes (renombre v2.7.0 Modif 2)").isNotNegative();
 
-            // Datos del fixture cierre.xlsx (ver gen_fixtures.py):
-            //   P-001 -> 5    (no-cero, comprueba que el COPY trae el valor)
-            //   P-002 -> 15   (no-cero)
-            //   P-003 -> 0    (cero legítimo, comprueba que tambien se copia)
-            //   P-008 -> 0    (cero legítimo)
-            //   P-007 -> 15
-            // El test comprueba ambos casos (no-cero y cero) para confirmar
-            // que CopyColumnStrategy hace exactamente lo que debe.
+            // La columna vieja debe haber desaparecido del nombre visible.
+            int colRHMold = findHeaderIndex(resultado, "Realizadas_Horas_Mes");
+            assertThat(colRHMold)
+                    .as("Realizadas_Horas_Mes ya no debe figurar en Resultado tras Modif 2")
+                    .isNegative();
+
+            // Valores esperados = Cierre.UltimaPrevision_Horas_Mes (gen_fixtures.py):
+            //   P-001 -> 10  (Realizadas_Horas_Mes seria 5  -> diferenciable)
+            //   P-002 -> 20  (Realizadas_Horas_Mes seria 15 -> diferenciable)
+            //   P-003 -> 0   (ambas son 0 — cero legitimo, sigue siendo valido COPY)
+            //   P-007 -> 50  (Realizadas_Horas_Mes seria 15 -> claramente distinto)
+            //   P-005 -> 15  (Realizadas_Horas_Mes seria 0  -> diferenciable)
+            // Si el test pasara aun apuntando a la fuente antigua, los pares
+            // (10,5), (20,15), (50,15), (15,0) serian distintos — fallaria.
             java.util.Map<String, Double> esperados = new java.util.HashMap<>();
-            esperados.put("P-001", 5.0);
-            esperados.put("P-002", 15.0);
+            esperados.put("P-001", 10.0);
+            esperados.put("P-002", 20.0);
             esperados.put("P-003", 0.0);
-            esperados.put("P-007", 15.0);
-            esperados.put("P-008", 0.0);
+            esperados.put("P-005", 15.0);
+            esperados.put("P-007", 50.0);
 
             int comprobadas = 0;
             for (int r = 1; r <= resultado.getLastRowNum(); r++) {
@@ -2402,12 +2469,12 @@ class ExcelMergerIntegrationTest {
                 String pet = pc.getStringCellValue();
                 Double exp = esperados.get(pet);
                 if (exp == null) continue;
-                Cell rhmCell = row.getCell(colRHM);
-                assertThat(rhmCell).as("celda Realizadas_Horas_Mes fila " + pet).isNotNull();
-                double actual = readNumericOrParse(rhmCell);
+                Cell hmCell = row.getCell(colHM);
+                assertThat(hmCell).as("celda Horas_Mes fila " + pet).isNotNull();
+                double actual = readNumericOrParse(hmCell);
                 assertThat(actual)
-                        .as("Realizadas_Horas_Mes[" + pet + "] debe copiarse tal cual desde "
-                                + "Cierre.Realizadas_Horas_Mes (sea cero o no).")
+                        .as("Horas_Mes[" + pet + "] debe copiarse desde "
+                                + "Cierre.UltimaPrevision_Horas_Mes (Modif 2 v2.7.0).")
                         .isEqualTo(exp);
                 comprobadas++;
             }
@@ -2440,5 +2507,495 @@ class ExcelMergerIntegrationTest {
             return cell.getNumericCellValue();
         }
         return Double.NaN;
+    }
+
+    // ==================================================================
+    //  v2.7.0 — Modif 1: Freeze top row en hojas visibles
+    // ==================================================================
+
+    /**
+     * v2.7.0 (Modif 1): por defecto, todas las hojas visibles del output
+     * tienen freeze de la primera fila. Se valida via
+     * {@link Sheet#getPaneInformation()}: el panel resultante tiene
+     * {@code horizontalSplitPosition == 1} y {@code verticalSplitPosition == 0}.
+     */
+    @Test
+    void v270FreezeTopRowAplicaATodasLasHojasVisiblesEnModoCompleto(@TempDir Path tmp)
+            throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "completo");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            // Hojas estandar visibles que SI deben tener freeze.
+            String[] visibles = {"Cierre", "Extraccion", "Deuda", "Resultado", "Resumen"};
+            for (String name : visibles) {
+                Sheet sheet = wb.getSheet(name);
+                if (sheet == null) continue; // Algunas pueden faltar segun fixture
+                org.apache.poi.ss.util.PaneInformation pane = sheet.getPaneInformation();
+                assertThat(pane)
+                        .as("hoja '" + name + "' debe tener freeze pane configurado")
+                        .isNotNull();
+                assertThat(pane.getHorizontalSplitPosition())
+                        .as("hoja '" + name + "' freeze fila 1 (split horizontal = 1)")
+                        .isEqualTo((short) 1);
+                assertThat(pane.getVerticalSplitPosition())
+                        .as("hoja '" + name + "' sin split vertical")
+                        .isEqualTo((short) 0);
+            }
+        }
+    }
+
+    /**
+     * v2.7.0 (Modif 1): la hoja {@code Equipos}, cuando esta marcada hidden=true
+     * en el config, NO debe tener freeze (se omite explicitamente en el paso
+     * final).
+     *
+     * <p>Nota: en {@code test-config.properties} el default de
+     * {@code lookup.Equipos.hidden} es {@code false} (a diferencia del
+     * {@code config.properties} principal, donde es {@code true}). Por eso
+     * este test fuerza el override antes de invocar el merge.</p>
+     */
+    @Test
+    void v270FreezeTopRowNoSeAplicaAHojaOcultaEquipos(@TempDir Path tmp) throws IOException {
+        // En test-config Equipos no esta oculta por defecto; forzar hidden=true
+        // para poder validar la rama "skip ocultas" del freeze.
+        java.util.Map<String, String> overrides = new java.util.LinkedHashMap<>();
+        overrides.put("lookup.Equipos.hidden", "true");
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOverrides(tmp, "completo", overrides);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet equipos = wb.getSheet("Equipos");
+            assertThat(equipos).as("hoja Equipos presente").isNotNull();
+
+            // Pre-condicion: el override surtio efecto y la hoja esta oculta.
+            int idx = wb.getSheetIndex("Equipos");
+            assertThat(wb.isSheetHidden(idx) || wb.isSheetVeryHidden(idx))
+                    .as("Equipos oculta tras override").isTrue();
+
+            // Y NO tiene freeze (es lo que valida la decision Fase 0 P1).
+            // Sin freeze: getPaneInformation() devuelve null o un pane sin split.
+            org.apache.poi.ss.util.PaneInformation pane = equipos.getPaneInformation();
+            if (pane != null) {
+                assertThat(pane.getHorizontalSplitPosition())
+                        .as("Equipos NO debe tener freeze fila 1")
+                        .isZero();
+            }
+        }
+    }
+
+    /**
+     * v2.7.0 (Modif 1): las hojas de responsable NO reciben freeze
+     * (decision Fase 0 P1: su row 1 contiene el nombre del responsable,
+     * no una cabecera tipo tabla).
+     */
+    @Test
+    void v270FreezeTopRowNoSeAplicaAHojasDeResponsable(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputMode(tmp, "responsables");
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            // tresp1@x y tresp2@x existen en el fixture realista.
+            for (String name : new String[]{"tresp1@x", "tresp2@x"}) {
+                Sheet sheet = wb.getSheet(name);
+                assertThat(sheet).as("hoja responsable " + name + " presente").isNotNull();
+                org.apache.poi.ss.util.PaneInformation pane = sheet.getPaneInformation();
+                if (pane != null) {
+                    assertThat(pane.getHorizontalSplitPosition())
+                            .as("hoja responsable " + name + " sin freeze (Fase 0 P1)")
+                            .isZero();
+                }
+            }
+        }
+    }
+
+    /**
+     * v2.7.0 (Modif 1): {@code output.freezeTopRow=false} desactiva el freeze
+     * en TODAS las hojas, incluyendo las que por defecto lo tendrian.
+     */
+    @Test
+    void v270FreezeTopRowOptOutDejaTodasLasHojasSinFreeze(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = TestFixtures.buildRealisticConfigWithOutputModeAndFreeze(
+                tmp, "completo", false);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            for (String name : new String[]{"Cierre", "Resultado", "Resumen"}) {
+                Sheet sheet = wb.getSheet(name);
+                if (sheet == null) continue;
+                org.apache.poi.ss.util.PaneInformation pane = sheet.getPaneInformation();
+                if (pane != null) {
+                    assertThat(pane.getHorizontalSplitPosition())
+                            .as("hoja '" + name + "' sin freeze cuando output.freezeTopRow=false")
+                            .isZero();
+                }
+            }
+        }
+    }
+
+    // ==================================================================
+    //  v2.7.1 — Filtrado de filas con las 5 columnas a 0
+    // ==================================================================
+
+    /**
+     * v2.7.1: helper que copia los fixtures al tmp, abre {@code cierre.xlsx},
+     * anade una fila P-099 con {@code UltimaPrevision_Horas_Mes=0} y todos los
+     * demas valores que llevarian a Jira/Facturar/PDCL/PDCL+Deuda/Horas_Mes a 0,
+     * y devuelve la ruta del fichero modificado. La fila P-099 NO tiene
+     * imputaciones en {@code extraccion.xlsx} ni en {@code deuda.xlsx} (que
+     * tampoco se anade), de modo que sus 5 columnas son 0 y queda candidata a
+     * ser filtrada.
+     *
+     * <p>Tambien anade una segunda fila P-100 que <i>tiene</i> Horas_Mes=2.0
+     * pero ningun otro valor: esa fila NO debe filtrarse (Horas_Mes>0).</p>
+     *
+     * <p>Estructura del fichero {@code cierre.xlsx} segun
+     * {@code gen_fixtures.py}: cabeceras en fila 1, columnas:
+     * Peticion(0), Titulo(1), Aplicaci_Activi(2), Estado(3),
+     * Usuario_Resp_Tecnico(4), Horas_AutoriTotPeticion(5),
+     * Horas_RealizadoTot(6), Estado_Distribucion(7), Planificacion(8),
+     * Objeto_EstudioPeticion(9), Codigo_Facturacion(10), Recurso(11),
+     * Funcion(12), UltimaPrevision_Horas_Mes(13), Realizadas_Horas_Mes(14),
+     * Total_Horas_Autorizadas_Recurso(15), Total_Horas_Realizadas_Recurso(16).</p>
+     */
+    private static Path setupFixtureWithEmptyRows(Path tmp) throws IOException {
+        Path inputDir = tmp.resolve("input");
+        Files.createDirectories(inputDir);
+        TestFixtures.copyFixturesTo(inputDir);
+        Path cierre = inputDir.resolve("cierre.xlsx");
+        // Leer a bytes en memoria primero para no tener handle abierto cuando
+        // luego escribimos al mismo path (importante en Windows).
+        byte[] bytes = Files.readAllBytes(cierre);
+        try (java.io.ByteArrayInputStream bis = new java.io.ByteArrayInputStream(bytes);
+             Workbook wb = WorkbookFactory.create(bis)) {
+            Sheet s = wb.getSheet("Cierre");
+            int next = s.getLastRowNum() + 1;
+
+            // Fila P-099: todos los valores que repercuten en las 5 columnas
+            // de Resultado son 0:
+            //   - Sin imputaciones en extraccion.xlsx -> Jira=0 -> Facturar=0,
+            //     PDCL=0
+            //   - Sin entrada en deuda.xlsx (que no incluimos) -> PDCL+Deuda=0
+            //   - UltimaPrevision_Horas_Mes=0 -> Horas_Mes=0
+            // Por tanto las 5 columnas de Resultado para P-099 valen 0 y
+            // la fila debe filtrarse cuando mes.removeEmptyRows=true.
+            Row r1 = s.createRow(next);
+            r1.createCell(0).setCellValue("P-099");
+            r1.createCell(1).setCellValue("Peticion totalmente vacia (v2.7.1 fixture)");
+            r1.createCell(2).setCellValue("DF");
+            r1.createCell(3).setCellValue("Cerrada");
+            r1.createCell(4).setCellValue("trespFiltro@x"); // responsable nuevo, no debe aparecer
+            r1.createCell(5).setCellValue(10);
+            r1.createCell(6).setCellValue(0);
+            r1.createCell(7).setCellValue("OK");
+            r1.createCell(8).setCellValue("P9");
+            r1.createCell(9).setCellValue("Obj zero");
+            r1.createCell(10).setCellValue("CTR-099");
+            r1.createCell(11).setCellValue("M-9999");
+            r1.createCell(12).setCellValue("Dev");
+            // Regresion v2.7.1.1: el ERP serializa UltimaPrevision_Horas_Mes
+            // como STRING formateada ("0.00"), no como NUMERIC. El filtrado
+            // debe reconocer "0.00" como cero.
+            r1.createCell(13).setCellValue("0.00");
+            r1.createCell(14).setCellValue(0);
+            r1.createCell(15).setCellValue(10);
+            r1.createCell(16).setCellValue(0);
+
+            // Fila P-100: Jira=Facturar=PDCL=PDCL+Deuda=0 pero Horas_Mes=2.0
+            // -> NO debe filtrarse.
+            Row r2 = s.createRow(next + 1);
+            r2.createCell(0).setCellValue("P-100");
+            r2.createCell(1).setCellValue("Peticion solo Horas_Mes (v2.7.1 fixture)");
+            r2.createCell(2).setCellValue("DF");
+            r2.createCell(3).setCellValue("Abierta");
+            r2.createCell(4).setCellValue("trespResta@x");
+            r2.createCell(5).setCellValue(20);
+            r2.createCell(6).setCellValue(0);
+            r2.createCell(7).setCellValue("OK");
+            r2.createCell(8).setCellValue("P10");
+            r2.createCell(9).setCellValue("Obj only-mes");
+            r2.createCell(10).setCellValue("CTR-100");
+            r2.createCell(11).setCellValue("M-10000");
+            r2.createCell(12).setCellValue("Dev");
+            // Regresion v2.7.1.1: STRING "2.00" debe contar como no-cero
+            // (parsea numericamente a 2.0).
+            r2.createCell(13).setCellValue("2.00");
+            r2.createCell(14).setCellValue(0);
+            r2.createCell(15).setCellValue(20);
+            r2.createCell(16).setCellValue(0);
+
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(cierre.toFile())) {
+                wb.write(fos);
+            }
+        }
+        return inputDir;
+    }
+
+    /**
+     * v2.7.1: con {@code mes.removeEmptyRows=true} (default), una fila como
+     * P-099 (todas las 5 columnas a 0) debe eliminarse fisicamente del output.
+     * La fila P-100 (Horas_Mes&gt;0) debe sobrevivir.
+     */
+    @Test
+    void v271FilasConTodasLasColumnasACeroSeEliminan(@TempDir Path tmp) throws IOException {
+        Path inputDir = setupFixtureWithEmptyRows(tmp);
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
+
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(outputFile.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            Sheet mes = wb.getSheet("Resultado");
+            assertThat(mes).isNotNull();
+
+            java.util.Set<String> peticionesEnResultado = new java.util.HashSet<>();
+            for (int r = 1; r <= mes.getLastRowNum(); r++) {
+                Row row = mes.getRow(r);
+                if (row == null) continue;
+                Cell c = row.getCell(0);
+                if (c != null && c.getCellType() == CellType.STRING) {
+                    peticionesEnResultado.add(c.getStringCellValue());
+                }
+            }
+
+            // P-099 ha desaparecido (filtrada)
+            assertThat(peticionesEnResultado).doesNotContain("P-099");
+            // P-100 sigue presente (Horas_Mes>0 la salva)
+            assertThat(peticionesEnResultado).contains("P-100");
+            // Peticiones del fixture base siguen presentes
+            assertThat(peticionesEnResultado).contains("P-001", "P-002", "P-014");
+        }
+    }
+
+    /**
+     * v2.7.1 (regresion protegida): con {@code mes.removeEmptyRows=false}, el
+     * comportamiento debe ser identico al de v2.7.0. La fila P-099 (todo 0)
+     * debe permanecer en Resultado.
+     */
+    @Test
+    void v271ConfigDesactivadaConservaComportamientoV270(@TempDir Path tmp) throws IOException {
+        Path inputDir = setupFixtureWithEmptyRows(tmp);
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        // Apagar el filtrado
+        String content = Files.readString(cfgFile);
+        content = content.replace("mes.removeEmptyRows=true", "mes.removeEmptyRows=false");
+        Files.writeString(cfgFile, content);
+        ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
+
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(outputFile.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            Sheet mes = wb.getSheet("Resultado");
+            java.util.Set<String> peticionesEnResultado = new java.util.HashSet<>();
+            for (int r = 1; r <= mes.getLastRowNum(); r++) {
+                Row row = mes.getRow(r);
+                if (row == null) continue;
+                Cell c = row.getCell(0);
+                if (c != null && c.getCellType() == CellType.STRING) {
+                    peticionesEnResultado.add(c.getStringCellValue());
+                }
+            }
+            // Con la flag a false, P-099 sigue ahi (comportamiento v2.7.0)
+            assertThat(peticionesEnResultado).contains("P-099");
+            assertThat(peticionesEnResultado).contains("P-100");
+        }
+    }
+
+    /**
+     * v2.7.1: tras el filtrado, los SUMIFS de Resumen siguen siendo correctos.
+     * Verificamos con FormulaEvaluator que los totales por matricula NO incluyen
+     * la fila eliminada (P-099 con M-9999) y que la matricula M-9999 NO
+     * aparece en la primera tabla del Resumen (porque
+     * {@code SummarySheetBuilder.discoverMatriculas} lee filas FISICAS de
+     * Resultado, ya filtrado).
+     */
+    @Test
+    void v271FiltradoDejaResumenConsistente(@TempDir Path tmp) throws IOException {
+        Path inputDir = setupFixtureWithEmptyRows(tmp);
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
+
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(outputFile.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            Sheet resumen = wb.getSheet("Resumen");
+            assertThat(resumen).isNotNull();
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            // Recolectar las matriculas listadas en la columna A de Resumen
+            // (a partir de fila 4, que es la primera fila de datos).
+            java.util.Set<String> matriculasEnResumen = new java.util.HashSet<>();
+            for (int r = 3; r <= resumen.getLastRowNum(); r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                Cell c = row.getCell(0);
+                if (c == null) continue;
+                if (c.getCellType() == CellType.STRING) {
+                    String v = c.getStringCellValue();
+                    if (!"Total".equals(v) && !v.isEmpty()) {
+                        matriculasEnResumen.add(v);
+                    }
+                } else if (c.getCellType() == CellType.NUMERIC) {
+                    matriculasEnResumen.add(String.valueOf((long) c.getNumericCellValue()));
+                }
+            }
+
+            // M-9999 (matricula de la fila P-099 filtrada) NO debe aparecer
+            assertThat(matriculasEnResumen)
+                    .as("M-9999 era la unica matricula de la fila filtrada; no debe aparecer en Resumen")
+                    .doesNotContain("M-9999");
+            // M-10000 (matricula de la fila P-100, no filtrada) SI aparece
+            assertThat(matriculasEnResumen).contains("M-10000");
+
+            // Verificacion adicional: sumar el Jira de la fila M-10000 debe
+            // dar 0 (porque P-100 no tiene imputaciones), pero la matricula
+            // sigue listada porque tiene una fila con Horas_Mes>0.
+            int rowM10000 = -1;
+            for (int r = 3; r <= resumen.getLastRowNum(); r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                Cell c = row.getCell(0);
+                if (c != null && c.getCellType() == CellType.STRING
+                        && "M-10000".equals(c.getStringCellValue())) {
+                    rowM10000 = r;
+                    break;
+                }
+            }
+            assertThat(rowM10000).as("Fila M-10000 debe estar presente en Resumen").isPositive();
+            // La columna B (idx 1) es Jira sumado por matricula. Para M-10000,
+            // ese SUMIFS debe dar 0 (no hay imputaciones).
+            CellValue cvJira = evaluator.evaluate(resumen.getRow(rowM10000).getCell(1));
+            assertThat(cvJira.getNumberValue()).isZero();
+        }
+    }
+
+    /**
+     * v2.7.1 (regla inquebrantable 4): tras el filtrado, los totales del
+     * Resumen siguen evaluando con FormulaEvaluator a los valores correctos.
+     * Concretamente: para una matricula presente en el fixture base
+     * (M-1001, que tiene varias peticiones con Jira&gt;0), el SUMIFS de Jira
+     * en Resumen debe coincidir con la suma manual de las celdas Jira de
+     * Resultado para esa matricula. Esto verifica que el shiftRows / la
+     * compactacion no ha dejado referencias rotas ni valores fantasma.
+     */
+    @Test
+    void v271TotalesResumenCoincidenConSumaManualTrasFiltrado(@TempDir Path tmp) throws IOException {
+        Path inputDir = setupFixtureWithEmptyRows(tmp);
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
+
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(outputFile.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            Sheet resultado = wb.getSheet("Resultado");
+            Sheet resumen = wb.getSheet("Resumen");
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+
+            // Indices de columnas en Resultado segun test-config:
+            // Petición=0, Aplicación=1, Equipo=2, Jira=3, Facturar=4, Matrícula=5, ...
+            // Suma manual del Jira de las filas con Matrícula="M-1001" en Resultado.
+            double sumaJiraM1001 = 0.0;
+            for (int r = 1; r <= resultado.getLastRowNum(); r++) {
+                Row row = resultado.getRow(r);
+                if (row == null) continue;
+                Cell mat = row.getCell(5);
+                if (mat == null || mat.getCellType() != CellType.STRING) continue;
+                if (!"M-1001".equals(mat.getStringCellValue())) continue;
+                Cell jira = row.getCell(3);
+                if (jira == null) continue;
+                if (jira.getCellType() == CellType.NUMERIC) {
+                    sumaJiraM1001 += jira.getNumericCellValue();
+                } else if (jira.getCellType() == CellType.FORMULA) {
+                    CellValue cv = evaluator.evaluate(jira);
+                    if (cv.getCellType() == CellType.NUMERIC) {
+                        sumaJiraM1001 += cv.getNumberValue();
+                    }
+                }
+            }
+
+            // Buscar fila M-1001 en Resumen y evaluar su SUMIFS de Jira (col B)
+            double resumenJiraM1001 = -1.0;
+            for (int r = 3; r <= resumen.getLastRowNum(); r++) {
+                Row row = resumen.getRow(r);
+                if (row == null) continue;
+                Cell c = row.getCell(0);
+                if (c != null && c.getCellType() == CellType.STRING
+                        && "M-1001".equals(c.getStringCellValue())) {
+                    CellValue cv = evaluator.evaluate(row.getCell(1));
+                    resumenJiraM1001 = cv.getNumberValue();
+                    break;
+                }
+            }
+            assertThat(resumenJiraM1001).isNotEqualTo(-1.0);
+            assertThat(resumenJiraM1001).isEqualTo(sumaJiraM1001);
+        }
+    }
+
+    /**
+     * v2.7.1: una matricula que solo tenia filas-cero NO genera fila ni en
+     * Resumen ni en las pivots de los responsables. Con M-9999 unica de
+     * P-099 (filtrada), NO debe aparecer en ningun sitio.
+     */
+    @Test
+    void v271MatriculasYResponsablesQueSoloTenianFilasCeroNoAparecen(@TempDir Path tmp) throws IOException {
+        Path inputDir = setupFixtureWithEmptyRows(tmp);
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        // Cambiar a modo completo para que tambien se generen las hojas de
+        // responsable.
+        String content = Files.readString(cfgFile);
+        content = content.replaceAll("(?m)^output\\.mode=.*$", "output.mode=completo");
+        if (!content.contains("output.mode=")) {
+            content = content + System.lineSeparator() + "output.mode=completo" + System.lineSeparator();
+        }
+        Files.writeString(cfgFile, content);
+        ConfigLoader cfg = new ConfigLoader(cfgFile.toString());
+
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(outputFile.toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+            // El responsable de P-099 era trespFiltro@x. Como esa fila
+            // se ha filtrado, NO debe haber hoja para ese responsable.
+            assertThat(wb.getSheet("trespFiltro@x"))
+                    .as("trespFiltro@x solo tenia P-099 (filtrada); su hoja no debe existir")
+                    .isNull();
+
+            // El responsable de P-100 era trespResta@x; SI debe tener hoja
+            // (P-100 sobrevive por Horas_Mes>0).
+            assertThat(wb.getSheet("trespResta@x"))
+                    .as("trespResta@x tiene P-100 (no filtrada); su hoja debe existir")
+                    .isNotNull();
+        }
     }
 }
