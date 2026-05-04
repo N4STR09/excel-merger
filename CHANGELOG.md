@@ -1,5 +1,86 @@
 # Changelog
 
+## [3.0.0] — BREAKING: Menú interactivo, eliminación de la CLI argumentada
+
+Versión mayor. Reemplaza la CLI argumentada anterior por un menú interactivo obligatorio que aparece **siempre** al arrancar el JAR. **Esta versión rompe la API de línea de comandos**; cualquier script de automatización o integración existente requerirá refactor.
+
+### ⚠️ BREAKING — Eliminado
+
+- **Flag `--help` / `-h`**. Eliminada. La documentación del programa vive en este `README.md` y `CHANGELOG.md`.
+- **Flag `--version` / `-v`**. Eliminada. La versión se muestra en el banner ASCII al arrancar el menú.
+- **Flag `--dry-run`**. Eliminada como flag CLI. Sustituida por la clave `output.dryRun` en `config.properties` (default `false`). Para activar dry-run desde v3.0.0, edita el config y pon `output.dryRun=true`.
+- **Argumento posicional `<configPath>`**. Eliminado. El JAR siempre lee `config.properties` del directorio actual. Para usar configs alternativas, copia o renombra el deseado a `config.properties` antes de lanzar.
+
+Cualquier argumento pasado al JAR en línea de comandos se ignora silenciosamente (sin warning, salvo el aviso que `run.bat` añade desde el wrapper).
+
+### Añadido
+
+- **Menú interactivo (JLine 3.30.4)**. Al arrancar `java -jar excel-merger.jar` aparece:
+  ```
+    _____                _   __  __
+   | ____|_  _____ ___  | | |  \/  | ___ _ __ __ _  ___ _ __
+   |  _| \ \/ / __/ _ \ | | | |\/| |/ _ \ '__/ _` |/ _ \ '__|
+   | |___ >  < (_|  __/ | | | |  | |  __/ | | (_| |  __/ |
+   |_____/_/\_\___\___| |_| |_|  |_|\___|_|  \__, |\___|_|
+                                             |___/     v3.0.0
+
+   Fusion de exports ERP + Jira para cierre mensual
+
+  ¿Que quieres hacer?
+
+    1) Fusion de Excel
+    2) Otra opcion (pendiente)
+    3) Salir sin hacer nada
+
+  Selecciona una opcion [1-3]:
+  ```
+  - **Opción 1**: ejecuta la fusión completa con la `config.properties` actual. Tras OK, sale con código 0. Tras error, muestra el mensaje, espera Enter y sale con el código 1-4 correspondiente. La pausa antes de salir es importante para doble-click sobre el JAR en Windows, donde la ventana se cerraría perdiendo el error.
+  - **Opción 2**: placeholder (gris, cursiva). Muestra `Funcionalidad no disponible aun. Se implementara en una version posterior.` y vuelve al menú. Reservada para una futura segunda funcionalidad sin definir.
+  - **Opción 3**: termina con código 0 sin tocar nada.
+  - Cualquier otro input (números fuera de rango, letras, vacío, espacios) muestra `Opcion invalida, introduce 1, 2 o 3` y vuelve al menú.
+
+- **Clave `output.dryRun=false|true`** en `config.properties`. Sustituye al antiguo flag `--dry-run`. Si está ausente, default `false` (comportamiento de producción normal).
+
+- **Clase `com.excelmerger.App`**. Logica de fusión extraída de `Main.main(args)` para que sea testeable sin pasar por `System.exit(...)`. Expone un único método `App.run(String configPath)` que devuelve el exit code en lugar de invocar exit. Los exit codes (0=OK, 1=runtime, 2=config, 3=input, 4=output) se mantienen idénticos a v2.7.1.
+
+- **Clases `com.excelmerger.cli.InteractiveMenu` y `com.excelmerger.cli.BannerPrinter`**. Encapsulan el menú JLine y el banner ASCII respectivamente. Ambas con tests unitarios que inyectan `DumbTerminal` con stdin simulado, sin depender de un TTY real.
+
+### Cambiado
+
+- **`Main.java`** queda reducido a ~10 líneas: arranca el menú interactivo y propaga el exit code que devuelva. Toda la lógica anterior (carga de config, validación, merge, banner final) vive ahora en `App.java`.
+
+- **`run.bat`** ya no acepta argumentos. Si los pasas, los ignora con un aviso que recuerda renombrar el config en lugar de pasarlo. Sigue haciendo `pause` al final para que la ventana no se cierre antes de leer el resultado en doble-click.
+
+### Dependencia añadida
+
+- `org.jline:jline:3.30.4` (BSD license, ~1 MB). Bundle monolítico que agrupa terminal+reader+nativo. Compatible con Java 8+ (este proyecto usa Java 25). El `maven-shade-plugin` ya tenía `ServicesResourceTransformer` configurado, que es lo que JLine necesita para descubrir su `TerminalProvider` por SPI tras el shade.
+
+### Tamaño del fat-jar
+
+Aumenta de ~19 MB (v2.7.1) a ~20-21 MB estimados. Aumento del 5-10%, asumible.
+
+### Migración
+
+| v2.7.1 | v3.0.0 |
+|--------|--------|
+| `java -jar excel-merger.jar` | Igual, pero ahora aparece menú |
+| `java -jar excel-merger.jar mi.properties` | `cp mi.properties config.properties && java -jar excel-merger.jar` |
+| `java -jar excel-merger.jar --dry-run` | Pon `output.dryRun=true` en config |
+| `java -jar excel-merger.jar --help` | Lee `README.md` |
+| `java -jar excel-merger.jar --version` | La versión sale en el banner del menú |
+| `run.bat contabilidad` | `copy /Y config-contabilidad.properties config.properties && run.bat` |
+
+**Cron / CI**: la entrada interactiva implica que ya no se puede ejecutar Excel Merger sin TTY. Si lo lanzabas desde un job programado, será necesario esperar a la versión que reintroduzca un modo no-interactivo (planificado para una v3.x posterior).
+
+**Tests existentes**: ninguno se rompe estructuralmente. Los 313 tests de v2.7.1 siguen verdes; el único ajuste necesario es la versión esperada en `MainTest.appVersionEsLaEsperadaPorLaSesionE` (`"2.7.1"` → `"3.0.0"`). Ningún test invocaba `Main.main(args)` directamente (lo evita por causa de `System.exit`), por lo que la introducción del menú no afecta. Los tests nuevos de v3.0.0 (`AppTest`, `InteractiveMenuTest`, `BannerPrinterTest`) suman ~20 casos adicionales.
+
+### Decisiones tomadas y descartadas
+
+- **Sub-menú jerárquico en Opción 1** (con sub-decisiones para modo cierre/responsables/completo, dry-run, config alternativa): **descartado**. El modo se sigue leyendo de `output.mode` en config como en v2.7.1, sin sub-prompts. Mantener el menú simple ahora permite ampliarlo en futuras versiones sin BREAKING.
+- **Preservar dry-run con un sub-prompt s/N en Opción 1**: **descartado** a favor de la clave de config `output.dryRun`. Razón: el sub-prompt rompía la regla "Opción 1 = comportamiento idéntico al actual"; la clave de config integra dry-run en el mecanismo de configuración existente.
+- **Volver al menú principal tras la fusión**: **descartado**. Tras una fusión normalmente no se vuelve a fusionar en la misma sesión. Volver al menú es ruido.
+- **Salir directamente tras un error sin pausa**: **descartado**. En doble-click sobre el JAR en Windows la ventana se cierra perdiendo el mensaje. La pausa con "Pulsa Enter" lo evita.
+
 ## [2.7.1.2] — Hotfix sobre 2.7.1.1: traducción de auto-referencias `Resultado!$X$N` tras compactar
 
 Hotfix sobre 2.7.1.1. La 2.7.1.1 arregló el filtrado de filas con `Horas_Mes` STRING `"0.00"`, pero introdujo (mejor dicho, expuso) un bug **silencioso y grave** en las fórmulas `PDCL + Deuda` de las filas supervivientes: tras la compactación, las referencias absolutas a la propia hoja (`Resultado!$A$<row>`, `Resultado!$F$<row>`, `Resultado!$G$<row>`) quedaban apuntando al `<row>` original, que tras el shift correspondía a una fila distinta (otra petición/matrícula/función). El SUMIFS contra `Deuda!` no encontraba match y devolvía `0`, **perdiendo silenciosamente las horas de deuda** para todas las filas movidas por la compactación.

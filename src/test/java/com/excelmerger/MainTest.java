@@ -161,6 +161,15 @@ class MainTest {
         //        Efecto secundario positivo: Resumen y pivots de responsable
         //        no muestran filas con totales 0 porque sus claves descubren
         //        a partir de las filas FISICAS de Resultado, ya filtrado.
-        assertThat(Main.APP_VERSION).isEqualTo("2.7.1");
+        // 3.0.0: BREAKING CHANGE. Eliminada la CLI argumentada (--help,
+        //        --version, --dry-run, <configPath>). Al arrancar el JAR
+        //        aparece SIEMPRE un menu interactivo (JLine) con tres
+        //        opciones: 1) Fusion de Excel, 2) Otra opcion (placeholder),
+        //        3) Salir. La logica de fusion se ha extraido a la clase
+        //        com.excelmerger.App para testabilidad. El antiguo
+        //        --dry-run se reemplaza por la clave de config
+        //        output.dryRun (default false). Ver CHANGELOG [3.0.0]
+        //        seccion Migracion.
+        assertThat(Main.APP_VERSION).isEqualTo("3.0.0");
     }
 }

@@ -18,7 +18,11 @@ excel-merger/
 ├── output/                      # Aquí se genera el resultado
 ├── src/main/
 │   ├── java/com/excelmerger/
-│   │   ├── Main.java                    # Punto de entrada
+│   │   ├── Main.java                    # Punto de entrada (menú interactivo, v3.0.0)
+│   │   ├── App.java                     # Lógica de fusión (v3.0.0, extraída de Main)
+│   │   ├── cli/
+│   │   │   ├── InteractiveMenu.java     # Menú JLine (v3.0.0)
+│   │   │   └── BannerPrinter.java       # Banner ASCII art (v3.0.0)
 │   │   ├── ConfigLoader.java            # Carga del config en UTF-8
 │   │   ├── ConfigValidator.java         # Validación previa del config
 │   │   ├── RunReport.java               # Acumula hojas/warnings del run
@@ -126,44 +130,80 @@ El `pom.xml` configura JaCoCo 0.8.14 con umbral **70% INSTRUCTION a nivel de bun
 
 ## Ejecución
 
-### Windows (recomendado)
+### Menú interactivo (v3.0.0)
 
-Doble clic en `run.bat`. Desde una terminal de Windows también puedes pasarle un **alias de entorno** como primer argumento:
+A partir de v3.0.0 el JAR muestra **siempre** un menú interactivo al arrancar. Ya **no se aceptan argumentos en la línea de comandos**: las antiguas flags `--help`, `--version`, `--dry-run` y el config posicional `<configPath>` han sido eliminados.
+
+Al ejecutar:
+
+```bash
+java -jar target/excel-merger-3.0.0-jar-with-dependencies.jar
+```
+
+aparece algo así:
+
+```
+  _____                _   __  __
+ | ____|_  _____ ___  | | |  \/  | ___ _ __ __ _  ___ _ __
+ |  _| \ \/ / __/ _ \ | | | |\/| |/ _ \ '__/ _` |/ _ \ '__|
+ | |___ >  < (_|  __/ | | | |  | |  __/ | | (_| |  __/ |
+ |_____/_/\_\___\___| |_| |_|  |_|\___|_|  \__, |\___|_|
+                                           |___/     v3.0.0
+
+ Fusion de exports ERP + Jira para cierre mensual
+
+¿Que quieres hacer?
+
+  1) Fusion de Excel
+  2) Otra opcion (pendiente)
+  3) Salir sin hacer nada
+
+Selecciona una opcion [1-3]:
+```
+
+Las tres opciones son:
+
+- **1) Fusion de Excel**: ejecuta el flujo completo. Lee `config.properties`, valida, detecta los Excel de entrada, fusiona y escribe el output. Tras terminar OK, el programa sale con código 0. Si hay error, muestra el mensaje y espera Enter antes de salir con el código correspondiente (1-4).
+- **2) Otra opción (pendiente)**: placeholder reservado para una funcionalidad futura. Hoy muestra `Funcionalidad no disponible aun. Se implementara en una version posterior.` y vuelve al menú.
+- **3) Salir sin hacer nada**: termina con código 0 sin tocar ningún fichero.
+
+Cualquier opción inválida (`4`, letras, vacío, espacios) muestra `Opcion invalida, introduce 1, 2 o 3` y vuelve al menú.
+
+### Windows (doble clic)
+
+Doble clic en `run.bat`. El `.bat` arranca el JAR y al cerrar muestra el resultado con `pause` para que la ventana no se cierre antes de leerlo. Ya **no acepta argumentos**; si los pasas, se ignoran con un aviso.
+
+Para mantener varios entornos (`config-contabilidad.properties`, `config-soporte.properties`, etc.), copia o renombra el deseado a `config.properties` antes de lanzar:
 
 ```bat
-run.bat                     :: usa config.properties (default)
-run.bat contabilidad        :: usa config-contabilidad.properties
-run.bat mi-cfg.properties   :: pasa esta ruta tal cual al JAR
+copy /Y config-contabilidad.properties config.properties
+run.bat
 ```
 
-La regla que aplica el `.bat`:
-- Sin argumento → arranca el JAR sin pasar ningún config (el JAR usará `config.properties` del directorio actual).
-- Argumento que termina en `.properties` → se pasa tal cual.
-- Cualquier otro argumento → se resuelve a `config-<arg>.properties` en la carpeta del `.bat`.
+### Dry-run (v3.0.0: vía config)
 
-Si el fichero resuelto no existe, el lanzador aborta con **exit code 2** y muestra la ruta buscada, **antes** de arrancar la JVM.
+El antiguo flag `--dry-run` se ha sustituido por una clave en `config.properties`:
 
-### Línea de comandos
-
-```bash
-java -jar target/excel-merger-1.5.0-jar-with-dependencies.jar
+```properties
+output.dryRun=true
 ```
 
-Opcionalmente se puede pasar un config alternativo:
+Default: `false`. Si se pone a `true`, el flujo ejecuta validación, detección de perfiles, etc., pero **no escribe el Excel de salida ni mueve el anterior a `history/`**. En el log final verás `PROCESO FINALIZADO OK (DRY-RUN, N ms)`. Para volver al modo normal, pon la clave a `false` o quítala.
 
-```bash
-java -jar target/excel-merger-1.5.0-jar-with-dependencies.jar mi-config.properties
-```
+### Migración desde v2.7.1
 
-### Dry-run (v1.4.0)
+Si en v2.7.1 lanzabas:
 
-Ejecuta el pipeline completo (validación, detección de perfiles, apps sin mapeo, cabeceras, etc.) pero **no escribe el Excel de salida y no mueve el anterior a `history/`**. Útil antes de un cierre mensual para validar la configuración sin tocar el output real:
+| v2.7.1 | v3.0.0 |
+|--------|--------|
+| `java -jar excel-merger.jar` | Igual, pero ahora aparece menú |
+| `java -jar excel-merger.jar mi.properties` | Renombra `mi.properties` a `config.properties` y ejecuta sin args |
+| `java -jar excel-merger.jar --dry-run` | Pon `output.dryRun=true` en config y ejecuta sin args |
+| `java -jar excel-merger.jar --help` | Eliminado. Esta documentación lo reemplaza |
+| `java -jar excel-merger.jar --version` | Eliminado. La versión se muestra en el banner del menú |
+| `run.bat contabilidad` | `copy /Y config-contabilidad.properties config.properties` y luego `run.bat` |
 
-```bash
-java -jar target/excel-merger-1.5.0-jar-with-dependencies.jar --dry-run
-```
-
-En el log final verás `PROCESO FINALIZADO OK (DRY-RUN, N ms)`. Los warnings (apps sin mapeo, perfiles sin match...) aparecen igualmente en el resumen. Los chequeos de lock `~$` sobre el output sí se mantienen: si el fichero está abierto en Excel, te lo dice ya.
+**Cron / CI**: la entrada interactiva implica que **ya no se puede ejecutar Excel Merger sin TTY**. Si lo lanzabas desde un job programado, será necesario esperar a la versión que reintroduzca un modo no-interactivo (planificado para una v3.x posterior, no para 3.0.0).
 
 ## Flujo del programa
 
@@ -614,7 +654,7 @@ report.sheetName=_Avisos
 report.hidden=true
 ```
 
-La hoja tiene dos columnas (`Categoria` y `Mensaje`) y un warning por fila, en el orden en que se produjeron. Las categorías habituales son `PERFIL`, `CABECERA`, `FORMULA`, `LOOKUP`, `HOJA` y `CONFIG`. En modo `--dry-run` la hoja también se construye (en memoria), aunque no se escriba a disco.
+La hoja tiene dos columnas (`Categoria` y `Mensaje`) y un warning por fila, en el orden en que se produjeron. Las categorías habituales son `PERFIL`, `CABECERA`, `FORMULA`, `LOOKUP`, `HOJA` y `CONFIG`. En modo dry-run (`output.dryRun=true`) la hoja también se construye (en memoria), aunque no se escriba a disco.
 
 ### Códigos de salida
 

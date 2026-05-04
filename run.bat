@@ -1,19 +1,22 @@
 @echo off
 REM ==========================================================
-REM  Excel Merger - lanzador
+REM  Excel Merger v3.0.0 - lanzador
 REM ==========================================================
-REM  Doble clic para ejecutar el JAR sin abrir la terminal.
-REM  El .bat se posiciona en su propia carpeta, asi las rutas
-REM  relativas del config.properties (input/, output/...) funcionan
-REM  aunque lo lances desde un acceso directo o desde otra carpeta.
+REM  Doble clic para ejecutar el JAR. Al arrancar, aparece un
+REM  menu interactivo con tres opciones (1: Fusion, 2: pendiente,
+REM  3: Salir). El config a usar es siempre 'config.properties'
+REM  del directorio del .bat.
 REM
-REM  Configs por entorno:
-REM    run.bat                      -> usa config.properties (default del JAR)
-REM    run.bat contabilidad         -> usa config-contabilidad.properties
-REM    run.bat mi-cfg.properties    -> pasa la ruta/nombre tal cual al JAR
+REM  v3.0.0 BREAKING: ya NO se aceptan argumentos. Las antiguas
+REM  formas:
+REM    run.bat                      (default config) -> SIGUE FUNCIONANDO
+REM    run.bat contabilidad         -> YA NO. Renombra el config
+REM                                    'config-contabilidad.properties'
+REM                                    a 'config.properties' o copialo.
+REM    run.bat mi-cfg.properties    -> YA NO. Mismo workaround.
 REM
-REM  Si el fichero resuelto no existe en la carpeta del .bat, el
-REM  lanzador aborta con codigo de salida 2 antes de arrancar Java.
+REM  Para entornos multiples mantener varios 'config-<entorno>.properties'
+REM  y copiar el deseado a 'config.properties' antes de lanzar.
 REM ==========================================================
 
 setlocal
@@ -21,25 +24,15 @@ setlocal
 REM Situarse en la carpeta donde esta este .bat
 cd /d "%~dp0"
 
-REM --- Resolver el fichero de configuracion a partir del primer argumento ---
-set "CONFIG_ARG="
-if "%~1"=="" goto afterConfig
-
-call :resolveConfig "%~1"
-
-if not exist "%CONFIG_ARG%" (
+REM Aviso si el usuario ha pasado algun argumento (v2.7.1 lo hacia)
+if not "%~1"=="" (
     echo.
-    echo [ERROR] No se encuentra el fichero de configuracion: %CONFIG_ARG%
-    echo         Buscado en: %CD%\%CONFIG_ARG%
-    echo         Si es un entorno nuevo, crealo copiando 'config.properties'
-    echo         como plantilla. Por ejemplo:
-    echo           copy config.properties %CONFIG_ARG%
+    echo [AVISO] v3.0.0 ya no acepta argumentos en linea de comandos.
+    echo         El argumento '%~1' sera ignorado por el JAR.
+    echo         Si necesitas un config alternativo, copialo como
+    echo         'config.properties' antes de lanzar.
     echo.
-    pause
-    exit /b 2
 )
-
-:afterConfig
 
 REM Buscar el JAR ejecutable (permite cambios de version sin editar el .bat)
 set "JAR="
@@ -59,18 +52,10 @@ if not defined JAR (
 )
 
 echo.
-if defined CONFIG_ARG (
-    echo Ejecutando: %JAR% con config '%CONFIG_ARG%'
-) else (
-    echo Ejecutando: %JAR%
-)
+echo Ejecutando: %JAR%
 echo.
 
-if defined CONFIG_ARG (
-    java -jar "%JAR%" "%CONFIG_ARG%"
-) else (
-    java -jar "%JAR%"
-)
+java -jar "%JAR%"
 set EXITCODE=%ERRORLEVEL%
 
 echo.
@@ -84,19 +69,3 @@ echo.
 pause
 endlocal
 exit /b %EXITCODE%
-
-REM ==========================================================
-REM Subrutina: resuelve el argumento a una ruta de .properties
-REM   %~1 = argumento del usuario (p. ej. 'contabilidad' o 'cfg.properties')
-REM   Deja el resultado en la variable CONFIG_ARG:
-REM     - Si el argumento ya termina en '.properties', se usa tal cual.
-REM     - Si no, se construye 'config-<arg>.properties'.
-REM ==========================================================
-:resolveConfig
-set "ARG=%~1"
-if /I "%ARG:~-11%"==".properties" (
-    set "CONFIG_ARG=%ARG%"
-) else (
-    set "CONFIG_ARG=config-%ARG%.properties"
-)
-goto :eof

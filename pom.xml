@@ -6,7 +6,7 @@
 
     <groupId>com.excelmerger</groupId>
     <artifactId>excel-merger</artifactId>
-    <version>2.7.1</version>
+    <version>3.0.0</version>
     <packaging>jar</packaging>
 
     <name>Excel Merger</name>
@@ -29,6 +29,7 @@
         <pmd.version>7.18.0</pmd.version>
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
         <checkstyle.version>10.21.4</checkstyle.version>
+        <jline.version>3.30.4</jline.version>
     </properties>
 
     <dependencyManagement>
@@ -58,6 +59,14 @@
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
             <version>1.4.14</version>
+        </dependency>
+
+        <!-- v3.0.0: menu interactivo. Bundle monolitico de JLine que
+             agrupa terminal+reader+nativo. BSD license. -->
+        <dependency>
+            <groupId>org.jline</groupId>
+            <artifactId>jline</artifactId>
+            <version>${jline.version}</version>
         </dependency>
 
         <!-- Test scope -->
@@ -96,6 +105,10 @@
                             <shadedArtifactAttached>true</shadedArtifactAttached>
                             <shadedClassifierName>jar-with-dependencies</shadedClassifierName>
                             <transformers>
+                                <!-- ServicesResourceTransformer: critico para JLine,
+                                     que descubre TerminalProvider via SPI
+                                     (META-INF/services/org.jline.terminal.spi.TerminalProvider).
+                                     Ya estaba presente desde antes de v3.0.0. -->
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.excelmerger.Main</mainClass>
