@@ -1,28 +1,27 @@
 package com.excelmerger.cli;
 
 import com.excelmerger.App;
+import com.excelmerger.compare.CompareRunner;
 
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
-import org.jline.utils.AttributedString;
-import org.jline.utils.AttributedStyle;
 
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.function.IntSupplier;
 
 /**
- * Menu interactivo de Excel Merger v3.0.0. Sustituye a la antigua CLI
- * argumentada de v2.7.1 (ahora eliminada).
+ * Menu interactivo de Excel Merger v3.0.0+. Sustituye a la antigua CLI
+ * argumentada de v2.7.1 (eliminada).
  *
  * <p>Aparece SIEMPRE al arrancar {@link com.excelmerger.Main} y ofrece
  * tres opciones:</p>
  * <ol>
  *   <li>Fusion de Excel — ejecuta el flujo completo via {@link App#run(String)}.</li>
- *   <li>Otra opcion (pendiente) — placeholder en gris/cursiva. Al elegirla,
- *       muestra mensaje "Funcionalidad no disponible aun" y vuelve al menu.</li>
+ *   <li>Comprobador de discrepancias contra CSV — invoca
+ *       {@link CompareRunner} (v3.1.0). Tras ejecutar, vuelve al menu.</li>
  *   <li>Salir sin hacer nada — devuelve {@link App#EXIT_OK}.</li>
  * </ol>
  *
@@ -36,16 +35,16 @@ import java.util.function.IntSupplier;
  * Windows, donde la ventana cerraria) y se devuelve el exit code para
  * que {@code Main} llame a {@code System.exit(code)}.</p>
  *
+ * <p>La Opcion 2 nunca termina el programa: si falla, muestra el error
+ * y vuelve al menu. Asi el usuario puede corregir los CSV y reintentar
+ * sin relanzar el JAR.</p>
+ *
  * <p>La clase admite inyeccion de {@link Terminal}, {@link LineReader},
- * {@link PrintStream} y un runner para Opcion 1 (lambda
- * {@code IntSupplier}), de modo que los tests no necesitan stdin real
- * ni entrar al merger real.</p>
+ * {@link PrintStream}, un runner para Opcion 1 y un runner para Opcion 2
+ * (ambos como {@link IntSupplier}/lambda), de modo que los tests no
+ * necesitan stdin real ni entrar al merger / comparador reales.</p>
  */
 public final class InteractiveMenu {
-
-    /** Texto exacto del placeholder de la Opcion 2. */
-    static final String OPTION_2_PLACEHOLDER_MESSAGE =
-            "Funcionalidad no disponible aun. Se implementara en una version posterior.";
 
     /** Texto exacto del aviso de input invalido. */
     static final String INVALID_OPTION_MESSAGE = "Opcion invalida, introduce 1, 2 o 3";
@@ -53,44 +52,48 @@ public final class InteractiveMenu {
     /** Prompt que pide la opcion. */
     static final String PROMPT = "Selecciona una opcion [1-3]: ";
 
-    private final Terminal terminal;
     private final LineReader reader;
     private final PrintStream out;
     private final IntSupplier optionOneRunner;
+    private final IntSupplier optionTwoRunner;
     private final BannerPrinter bannerPrinter;
 
     /**
      * Constructor publico de uso normal en {@link com.excelmerger.Main}.
-     * Crea un {@link Terminal} de sistema (stdin/stdout reales) y enlaza
-     * la Opcion 1 con {@link App#run(String)} pasando {@code null} (config
-     * por defecto).
+     * Crea un {@link Terminal} de sistema (stdin/stdout reales), enlaza
+     * la Opcion 1 con {@link App#run(String)} y la Opcion 2 con
+     * {@link CompareRunner#run()}.
      *
      * @throws IOException si no se puede inicializar el terminal JLine.
      */
     public InteractiveMenu() throws IOException {
-        this(buildSystemTerminal(), App::run, buildSystemOut());
+        this(buildSystemTerminal(), App::run, () -> new CompareRunner().run(),
+                buildSystemOut());
     }
 
     /**
      * Constructor para tests. Permite inyectar un terminal con stdin/stdout
-     * controlados, un runner falso para la Opcion 1 y un PrintStream de
-     * captura.
+     * controlados, runners falsos para Opcion 1 y Opcion 2, y un
+     * PrintStream de captura.
      *
      * @param terminal       terminal JLine ya construido (real o de test).
      * @param optionOneRunner accion que ejecuta la Opcion 1. Devuelve el
-     *                       exit code del merge.
+     *                        exit code del merge.
+     * @param optionTwoRunner accion que ejecuta la Opcion 2. Devuelve el
+     *                        exit code del comparador.
      * @param out            stream donde escribir banner, menu y mensajes
      *                       (los tests pasan un ByteArrayOutputStream).
      */
     InteractiveMenu(Terminal terminal,
                     java.util.function.Function<String, Integer> optionOneRunner,
+                    IntSupplier optionTwoRunner,
                     PrintStream out) {
-        this.terminal = terminal;
         this.reader = LineReaderBuilder.builder().terminal(terminal).build();
         this.out = out;
         // null = config por defecto. La firma queda preparada por si se
         // amplia en el futuro a un sub-flujo que pregunte la ruta.
         this.optionOneRunner = () -> optionOneRunner.apply(null);
+        this.optionTwoRunner = optionTwoRunner;
         this.bannerPrinter = new BannerPrinter(out);
     }
 
@@ -117,7 +120,9 @@ public final class InteractiveMenu {
      *   <li>Tras Opcion 1 con error: el exit code de {@link App#run(String)},
      *       previa pausa para que el usuario lea el mensaje.</li>
      *   <li>Tras Opcion 3: {@link App#EXIT_OK}.</li>
-     *   <li>La Opcion 2 no devuelve: vuelve al menu.</li>
+     *   <li>La Opcion 2 NO devuelve: vuelve al menu independientemente del
+     *       exit code interno (los errores se loguean y se muestran al
+     *       usuario, pero el programa sigue para que pueda reintentar).</li>
      * </ul>
      */
     public int run() {
@@ -131,9 +136,7 @@ public final class InteractiveMenu {
                 case "1":
                     return runOptionOne();
                 case "2":
-                    out.println();
-                    out.println(OPTION_2_PLACEHOLDER_MESSAGE);
-                    out.println();
+                    runOptionTwo();
                     // Vuelve al menu en la siguiente iteracion del while.
                     break;
                 case "3":
@@ -177,6 +180,28 @@ public final class InteractiveMenu {
     }
 
     /**
+     * Ejecuta la Opcion 2 (comprobador de discrepancias). v3.1.0.
+     * <p>A diferencia de la Opcion 1, NO termina el programa: tras la
+     * ejecucion vuelve al menu. Si el comparador devuelve un exit code
+     * distinto de OK se muestra un aviso y se espera Enter, pero el
+     * bucle del menu continua.</p>
+     */
+    private void runOptionTwo() {
+        int exitCode = optionTwoRunner.getAsInt();
+        if (exitCode != App.EXIT_OK) {
+            out.println();
+            out.println("[AVISO] El comprobador ha terminado con codigo " + exitCode + ".");
+            out.println("Pulsa Enter para continuar...");
+            waitForEnter();
+        }
+        // Pausa breve sin error: dejar que el usuario lea el resumen
+        // antes de redibujar el menu.
+        out.println();
+        out.println("Pulsa Enter para volver al menu...");
+        waitForEnter();
+    }
+
+    /**
      * Espera a que el usuario pulse Enter. Si JLine lanza
      * {@code EndOfFileException} (Ctrl+D, stdin agotado en tests) o
      * {@code UserInterruptException} (Ctrl+C), devuelve igualmente sin
@@ -207,23 +232,14 @@ public final class InteractiveMenu {
         }
     }
 
-    /** Muestra el menu con la Opcion 2 atenuada (gris / cursiva). */
+    /** Muestra el menu con las tres opciones activas. */
     private void printMenu() {
         out.println();
         out.println("¿Que quieres hacer?");
         out.println();
         out.println("  1) Fusion de Excel");
-
-        // Opcion 2: estilo atenuado (DIM) + cursiva (ITALIC) para indicar
-        // visualmente que es un placeholder. Si el terminal no soporta
-        // ANSI, JLine degrada a texto plano.
-        AttributedStyle dim = AttributedStyle.DEFAULT
-                .faint()
-                .italic();
-        AttributedString opt2 = new AttributedString(
-                "  2) Otra opcion (pendiente)", dim);
-        out.println(opt2.toAnsi(terminal));
-
+        // v3.1.0: la Opcion 2 ya no es placeholder. Estilo normal.
+        out.println("  2) Comprobador de discrepancias contra CSV");
         out.println("  3) Salir sin hacer nada");
         out.println();
     }

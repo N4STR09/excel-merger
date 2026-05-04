@@ -6,7 +6,7 @@
 
     <groupId>com.excelmerger</groupId>
     <artifactId>excel-merger</artifactId>
-    <version>3.0.0</version>
+    <version>3.1.0</version>
     <packaging>jar</packaging>
 
     <name>Excel Merger</name>
@@ -30,6 +30,7 @@
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
         <checkstyle.version>10.21.4</checkstyle.version>
         <jline.version>3.30.4</jline.version>
+        <commons-csv.version>1.11.0</commons-csv.version>
     </properties>
 
     <dependencyManagement>
@@ -67,6 +68,17 @@
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
             <version>${jline.version}</version>
+        </dependency>
+
+        <!-- v3.1.0: Opcion 2 del menu (comprobador de discrepancias contra
+             CSV externos del ERP). Apache Commons CSV (Apache License 2.0)
+             es la libreria estandar de Java para parsing CSV con manejo de
+             quotes, escapes y encodings configurables. No estaba presente
+             ni como transitiva de POI 5.2.5 ni de JLine. -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>${commons-csv.version}</version>
         </dependency>
 
         <!-- Test scope -->

@@ -1,5 +1,75 @@
 # Changelog
 
+## [3.1.0] — Opción 2 del menú: comprobador de discrepancias contra CSV del ERP
+
+Versión menor. Implementa la Opción 2 del menú interactivo de v3.0.0, que en aquella versión era un placeholder (`Funcionalidad no disponible aun…`). La nueva opción cruza los CSV exportados por el ERP contra el `output/resultado_fusion.xlsx` generado por la Opción 1 y produce un Excel con las discrepancias detectadas. **No hay BREAKING**: todo lo de v3.0.0 sigue funcionando idéntico.
+
+### Añadido
+
+- **Opción 2 del menú: "Comprobador de discrepancias contra CSV"**. Se ejecuta sobre los CSV depositados en `input/` (el detector de Opción 1 ya filtra solo `.xlsx`/`.xls`, así que CSV y Excel pueden coexistir sin interferir). Cruza cada CSV contra `output/resultado_fusion.xlsx` por la clave **(Matrícula, Petición, Función)** y reporta tres tipos de discrepancia:
+
+  | Tipo | Significado |
+  |------|------------|
+  | `DIFERENCIA` | La combinación existe en el CSV y en el Resultado, pero `Realizado Horas` ≠ `PDCL + Deuda`. |
+  | `SOLO_CSV` | La combinación existe en el CSV pero no en el Resultado del programa. |
+  | `SOLO_RESULTADO` | La combinación existe en el Resultado para la matrícula del CSV pero no aparece en ese CSV. |
+
+  Tolerancia de comparación: **cero**. Cualquier diferencia, aunque sea de 0,01 horas, se reporta. La motivación es que los CSV del ERP y el Resultado del programa son ambos numéricos discretos en horas — un descuadre, por pequeño que sea, indica algo real.
+
+  El resultado se escribe a `output/discrepancias_<yyyy-MM-dd_HHmmss>.xlsx`, una sola hoja `Discrepancias` con las columnas: `Origen`, `Tipo`, `Petición`, `Matrícula`, `Función`, `Realizado Horas`, `PDCL + Deuda`, `Diferencia`. Las celdas numéricas que no aplican según el tipo (p. ej. `Diferencia` en una `SOLO_CSV`) se dejan en BLANK, no en 0, para distinguirlas visualmente del valor cero legítimo.
+
+  Tras ejecutar, el menú **vuelve a aparecer** (a diferencia de la Opción 1, que termina el programa). Esto permite reintentar tras corregir un CSV sin relanzar el JAR.
+
+  Casos de "no hay nada que hacer", todos no-error, vuelven al menú con código 0:
+  - **No hay CSV en `input/`**: aviso y vuelta al menú.
+  - **No existe `output/resultado_fusion.xlsx`**: aviso "Ejecuta primero la Opción 1" y vuelta al menú.
+
+  Los errores reales (CSV mal formado en uno solo, Resultado corrupto, IO de escritura) se loguean y muestran al usuario, pero **no abortan** el procesamiento de los demás CSV. Si un solo CSV falla, el Excel de salida se genera igualmente con los CSV buenos.
+
+- **Paquete `com.excelmerger.compare`** con 8 clases nuevas:
+  - `CsvImputacion`: DTO inmutable de una imputación leída del CSV.
+  - `DiscrepancyKey`: clave compuesta `(matricula, peticion, funcion)`.
+  - `Discrepancy`: DTO inmutable de una discrepancia detectada (con su `Type`: `DIFERENCIA`, `SOLO_CSV`, `SOLO_RESULTADO` y factorías estáticas).
+  - `CsvParser`: lee y normaliza los CSV del ERP. Encoding **Windows-1252** por defecto (cp1252, no UTF-8); separador `;`; quoting `"`. Limpieza global del carácter `\u0000` (que el ERP inserta en `DR-Marca`); strip de la `J` prefijada en `Petición`; parser de decimales con coma estilo español, incluyendo el caso especial `",0"` (cero sin parte entera). Mapeo de columnas por **índice posicional** tras normalizar nombres, robusto frente a la cabecera `"Matricula "` con trailing space y al campo fantasma de espacios al final de cada fila.
+  - `ResultadoReader`: lee la hoja `Resultado` con `FormulaEvaluator.evaluateAll()` + `evaluator.evaluate(cell)` por celda con try/catch. Necesario porque `PDCL + Deuda` (col M) es una fórmula `=L<n>+IFERROR(SUMIFS(Deuda!…),0)` cuyo valor cacheado en el XLSX no es fiable (lección 1.7.1, regla inquebrantable 4). Valida que las cabeceras en A/F/G/M sean las esperadas, fallando explícito si el formato del Resultado ha cambiado. Agrega claves duplicadas sumando.
+  - `DiscrepancyComparator`: cruce CSV ↔ Resultado, devolviendo discrepancias en este orden estable: `DIFERENCIA` → `SOLO_CSV` → `SOLO_RESULTADO`. Agrega imputaciones CSV duplicadas por la misma clave sumando.
+  - `DiscrepancyExporter`: escribe el XLSX. Reusa `StyleFactory.header(wb)` para no duplicar estilos. Auto-tamaño de columnas + freeze de la fila de cabecera. NaN → BLANK.
+  - `CompareRunner`: orquestador. Tiene constructor de producción (paths por defecto) y constructor para tests con paths inyectables y `PrintStream` capturable.
+
+- **Tests del paquete compare**: ~52 tests adicionales repartidos en `CsvParserTest`, `ResultadoReaderTest`, `DiscrepancyComparatorTest`, `DiscrepancyExporterTest`, `CompareRunnerIntegrationTest` + `ResultadoFixtureBuilder` como helper. El integration test construye un setup completo en `@TempDir` (3 CSV de fixture + Resultado sintético) y verifica que se generan exactamente 7 discrepancias con la distribución esperada (1 `DIFERENCIA` + 4 `SOLO_CSV` + 2 `SOLO_RESULTADO`).
+
+- **Fixtures CSV** en `src/test/resources/fixtures/csv/`:
+  - `real_90054.csv`: copia byte-a-byte de un export real del ERP. Pequeño (1 fila). Verifica que el parser no rompe con el formato del ERP en producción.
+  - `fixture_99001.csv`, `fixture_99002.csv`, `fixture_99003.csv`: sintéticos pero generados con encoding cp1252, CRLF, byte NUL en `DR-Marca`, padding decimal con espacios y campo fantasma final, idénticos al formato real. Cubren los tres tipos de discrepancia.
+
+### Cambiado
+
+- **`InteractiveMenu`**: la Opción 2 ya no es un placeholder. Su entrada en el menú aparece con estilo normal (sin atenuación gris/cursiva). Al elegirla se invoca `CompareRunner.run()` y, tras ejecutarse, se vuelve al menú. La constante `OPTION_2_PLACEHOLDER_MESSAGE` ha sido eliminada. La firma del constructor para tests (paquete-privado) cambia: ahora acepta también un `IntSupplier optionTwoRunner` para inyectar el comportamiento de la Opción 2; el constructor público de producción cablea por defecto a `() -> new CompareRunner().run()`. Esta firma de tests es interna al paquete `cli`; no afecta al consumidor del JAR.
+
+- **`Main.APP_VERSION`** → `"3.1.0"`. El banner ASCII se actualiza automáticamente porque `BannerPrinter` lo lee de esa constante.
+
+### Dependencia añadida
+
+- `org.apache.commons:commons-csv:1.11.0` (Apache License 2.0, ~50 KB). Librería estándar de Java para parsing CSV con manejo de quotes, escapes y encodings configurables. No estaba presente ni como transitiva de POI 5.2.5 ni de JLine. Razón de elección: librería madura, mantenida por Apache, sin dependencias adicionales, y el proyecto ya usa otras librerías Apache (POI). Se descartaron alternativas como OpenCSV (más dependencias transitivas) y un parser propio (sería frágil con quoting y edge cases del CSV del ERP — campo fantasma final, NUL, padding).
+
+### Tamaño del fat-jar
+
+Aumenta de ~20 MB (v3.0.0) a ~20,05 MB estimados. Aumento despreciable (~50 KB de Commons CSV).
+
+### Reglas inquebrantables que impactaron la implementación
+
+- **Regla 4 (FormulaEvaluator obligatorio)**: `ResultadoReader` invoca `evaluator.evaluateAll()` antes de leer celdas y luego `evaluator.evaluate(cell)` por celda con try/catch, exactamente igual que `EmptyRowFilter.fillSheet`. La columna `PDCL + Deuda` es una fórmula con `SUMIFS` cross-sheet cuyo valor cacheado en el XLSX puede ser `null`; sin `FormulaEvaluator` se leerían ceros falsos y se generarían discrepancias inventadas.
+
+### Decisiones tomadas y descartadas
+
+- **Tolerancia configurable** (p. ej. ε=0,01 horas): **descartado**. La tolerancia es cero por defecto y no expuesta en config. Razón: el caso de uso (cierre mensual) demanda detectar cualquier descuadre. Si en el futuro se quiere relajar, basta con añadir `compare.tolerance` al `config.properties`.
+- **Comparar también `Realizado Horas` contra columna `PDCL` en lugar de `PDCL + Deuda`**: **descartado**. Los CSV del ERP tienen `Realizado Horas` que ya incluye la deuda histórica, así que la columna comparable es `PDCL + Deuda`, no `PDCL` sola.
+- **Generar un Excel por CSV** (en lugar de uno único agregando todos los CSV): **descartado**. Un único Excel con la columna `Origen` simplifica tanto el código como la revisión del cierre. Para filtrar por matrícula, basta con usar el filtro de Excel sobre la columna `Origen`.
+- **Acceso por nombre de cabecera con `CSVFormat.Builder.setHeader()`**: **descartado**. La cabecera real del ERP es `"Matricula "` (con trailing space) y al final de cada fila hay un campo fantasma de ~600 espacios; usar header-name access requeriría hacks específicos. Se opta por mapeo por índice posicional tras normalizar nombres, que es estable y robusto.
+- **Tratar el byte NUL solo en `DR-Marca`**: **descartado** a favor de limpieza global preventiva (`String.replace("\u0000", "")` en cada campo extraído). Coste: insignificante. Beneficio: cualquier byte NUL parásito futuro no rompe el parser.
+
+---
+
 ## [3.0.0] — BREAKING: Menú interactivo, eliminación de la CLI argumentada
 
 Versión mayor. Reemplaza la CLI argumentada anterior por un menú interactivo obligatorio que aparece **siempre** al arrancar el JAR. **Esta versión rompe la API de línea de comandos**; cualquier script de automatización o integración existente requerirá refactor.

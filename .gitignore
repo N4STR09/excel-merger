@@ -34,3 +34,6 @@ input/*.xlsx
 input/*.xls
 output/**/*.xlsx
 output/**/*.xls
+
+input/*.csv
+input/*.CSV

@@ -39,7 +39,7 @@ public final class Main {
 
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final String APP_NAME = "Excel Merger";
-    public static final String APP_VERSION = "3.0.0";
+    public static final String APP_VERSION = "3.1.0";
     private static final String GIT_PROPERTIES_PATH = "/git.properties";
 
     private Main() {

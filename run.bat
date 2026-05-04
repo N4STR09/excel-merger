@@ -1,14 +1,17 @@
 @echo off
 REM ==========================================================
-REM  Excel Merger v3.0.0 - lanzador
+REM  Excel Merger v3.1.0 - lanzador
 REM ==========================================================
 REM  Doble clic para ejecutar el JAR. Al arrancar, aparece un
-REM  menu interactivo con tres opciones (1: Fusion, 2: pendiente,
-REM  3: Salir). El config a usar es siempre 'config.properties'
-REM  del directorio del .bat.
+REM  menu interactivo con tres opciones:
+REM    1) Fusion de Excel
+REM    2) Comprobador de discrepancias contra CSV (v3.1.0)
+REM    3) Salir
+REM  El config a usar es siempre 'config.properties' del
+REM  directorio del .bat.
 REM
-REM  v3.0.0 BREAKING: ya NO se aceptan argumentos. Las antiguas
-REM  formas:
+REM  v3.0.0 BREAKING (sigue vigente): ya NO se aceptan argumentos.
+REM  Las antiguas formas:
 REM    run.bat                      (default config) -> SIGUE FUNCIONANDO
 REM    run.bat contabilidad         -> YA NO. Renombra el config
 REM                                    'config-contabilidad.properties'
@@ -27,7 +30,7 @@ cd /d "%~dp0"
 REM Aviso si el usuario ha pasado algun argumento (v2.7.1 lo hacia)
 if not "%~1"=="" (
     echo.
-    echo [AVISO] v3.0.0 ya no acepta argumentos en linea de comandos.
+    echo [AVISO] Desde v3.0.0 no se aceptan argumentos en linea de comandos.
     echo         El argumento '%~1' sera ignorado por el JAR.
     echo         Si necesitas un config alternativo, copialo como
     echo         'config.properties' antes de lanzar.

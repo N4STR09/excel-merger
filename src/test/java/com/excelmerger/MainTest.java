@@ -170,6 +170,11 @@ class MainTest {
         //        --dry-run se reemplaza por la clave de config
         //        output.dryRun (default false). Ver CHANGELOG [3.0.0]
         //        seccion Migracion.
-        assertThat(Main.APP_VERSION).isEqualTo("3.0.0");
+        // 3.1.0: MINOR. Implementada la Opcion 2 del menu — comprobador de
+        //        discrepancias contra CSV externos del ERP. Se anade el
+        //        paquete com.excelmerger.compare con CsvParser,
+        //        ResultadoReader, DiscrepancyComparator y DiscrepancyExporter.
+        //        Anade dependencia Apache Commons CSV. Ver CHANGELOG [3.1.0].
+        assertThat(Main.APP_VERSION).isEqualTo("3.1.0");
     }
 }

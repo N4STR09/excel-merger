@@ -130,14 +130,14 @@ El `pom.xml` configura JaCoCo 0.8.14 con umbral **70% INSTRUCTION a nivel de bun
 
 ## Ejecución
 
-### Menú interactivo (v3.0.0)
+### Menú interactivo (v3.0.0, ampliado en v3.1.0)
 
 A partir de v3.0.0 el JAR muestra **siempre** un menú interactivo al arrancar. Ya **no se aceptan argumentos en la línea de comandos**: las antiguas flags `--help`, `--version`, `--dry-run` y el config posicional `<configPath>` han sido eliminados.
 
 Al ejecutar:
 
 ```bash
-java -jar target/excel-merger-3.0.0-jar-with-dependencies.jar
+java -jar target/excel-merger-3.1.0-jar-with-dependencies.jar
 ```
 
 aparece algo así:
@@ -148,14 +148,14 @@ aparece algo así:
  |  _| \ \/ / __/ _ \ | | | |\/| |/ _ \ '__/ _` |/ _ \ '__|
  | |___ >  < (_|  __/ | | | |  | |  __/ | | (_| |  __/ |
  |_____/_/\_\___\___| |_| |_|  |_|\___|_|  \__, |\___|_|
-                                           |___/     v3.0.0
+                                           |___/     v3.1.0
 
  Fusion de exports ERP + Jira para cierre mensual
 
 ¿Que quieres hacer?
 
   1) Fusion de Excel
-  2) Otra opcion (pendiente)
+  2) Comprobador de discrepancias contra CSV
   3) Salir sin hacer nada
 
 Selecciona una opcion [1-3]:
@@ -164,7 +164,7 @@ Selecciona una opcion [1-3]:
 Las tres opciones son:
 
 - **1) Fusion de Excel**: ejecuta el flujo completo. Lee `config.properties`, valida, detecta los Excel de entrada, fusiona y escribe el output. Tras terminar OK, el programa sale con código 0. Si hay error, muestra el mensaje y espera Enter antes de salir con el código correspondiente (1-4).
-- **2) Otra opción (pendiente)**: placeholder reservado para una funcionalidad futura. Hoy muestra `Funcionalidad no disponible aun. Se implementara en una version posterior.` y vuelve al menú.
+- **2) Comprobador de discrepancias contra CSV** (v3.1.0): cruza los CSV exportados por el ERP contra el `output/resultado_fusion.xlsx` generado por la Opción 1 y produce un Excel con las discrepancias detectadas. Tras ejecutar, **vuelve al menú** (a diferencia de la Opción 1, que termina). Ver [Opción 2: Comprobador de discrepancias contra CSV](#opción-2-comprobador-de-discrepancias-contra-csv-v310) más abajo.
 - **3) Salir sin hacer nada**: termina con código 0 sin tocar ningún fichero.
 
 Cualquier opción inválida (`4`, letras, vacío, espacios) muestra `Opcion invalida, introduce 1, 2 o 3` y vuelve al menú.
@@ -204,6 +204,113 @@ Si en v2.7.1 lanzabas:
 | `run.bat contabilidad` | `copy /Y config-contabilidad.properties config.properties` y luego `run.bat` |
 
 **Cron / CI**: la entrada interactiva implica que **ya no se puede ejecutar Excel Merger sin TTY**. Si lo lanzabas desde un job programado, será necesario esperar a la versión que reintroduzca un modo no-interactivo (planificado para una v3.x posterior, no para 3.0.0).
+
+### Opción 2: Comprobador de discrepancias contra CSV (v3.1.0)
+
+Esta opción cruza los **CSV exportados por el ERP** (uno por matrícula) contra el `output/resultado_fusion.xlsx` generado por la Opción 1, y produce un Excel con las discrepancias detectadas. Sirve como check de cierre: si el programa y el ERP no coinciden, sale en este informe.
+
+#### Requisitos previos
+
+1. Haber ejecutado la **Opción 1** (Fusión de Excel) al menos una vez en la sesión actual, de modo que exista `output/resultado_fusion.xlsx`. Si no existe, la Opción 2 te lo dirá y te devolverá al menú sin hacer nada.
+2. Tener uno o más **CSV del ERP** en `input/`, con el formato descrito abajo. Si no hay ninguno, la Opción 2 te lo dirá y te devolverá al menú.
+
+#### Formato esperado de los CSV
+
+Los CSV se llaman `<matricula>.CSV` (p. ej. `90014.CSV`, `90054.CSV`, `90319.CSV`). El nombre del fichero (sin extensión) se usa como **origen** del cruce y debe coincidir con la matrícula que aparece en el contenido. La extensión se reconoce **case-insensitive** (`.csv`, `.CSV`, `.Csv`).
+
+Características del fichero:
+
+- **Encoding**: Windows-1252 (cp1252). Es el formato que Excel exporta por defecto en Windows en español. **No es UTF-8**: leerlo como UTF-8 rompe las tildes de cabeceras como `Petición` o `Descripción de la solicitud`. El parser fija cp1252 explícitamente.
+- **Separador de campos**: `;`
+- **Quoting**: `"` (las celdas vienen entre comillas dobles).
+- **Decimal**: coma (`5,0`, `,0` para cero, `,5` para medio). El parser acepta padding de espacios delante (`"       5,0"`).
+- **Fin de línea**: CRLF (`\r\n`).
+- **Cabeceras obligatorias** (en cualquier posición): `Matricula` (con o sin trailing space, ambos sirven), `Petición`, `Fu`, `Realizado Horas`. El resto de cabeceras del export se aceptan pero se ignoran.
+- **Carácter `\u0000`** (byte NUL): aparece en el campo `DR-Marca` cuando está vacío. El parser hace limpieza global preventiva.
+- **Petición prefijada con `J`**: el parser quita la `J` (`J137791` → `137791`) para cruzar con el Resultado, donde la columna `Petición` está sin prefijo.
+
+Una fila típica:
+
+```
+"2026";" 4";"90014";"0001/2025 AN ";"01-04-2026";"D150";"EV31Z   ";"PG";"J137791";"D00PGDE";"  ";"RE";" 1  1";"FP ";"Modificar Zeregin para que se puedan retirar y transladar equipam";"       5,0";"       5,0";"       5,0";"\u0000";"        ,0";...
+```
+
+#### Cómo funciona el cruce
+
+Para cada CSV, el comparador:
+
+1. Lee todas sus filas y las normaliza: trim, descarte de NUL, strip de la `J` de Petición, decimal con coma → `double`.
+2. Para cada imputación `(matrícula, petición, función)`, busca esa misma clave en el `Resultado` del programa.
+3. Clasifica el resultado en uno de tres tipos:
+
+   | Tipo | Cuándo se reporta |
+   |------|-------------------|
+   | `DIFERENCIA` | La clave existe en CSV y Resultado, pero `Realizado Horas (CSV)` ≠ `PDCL + Deuda (Resultado)`. |
+   | `SOLO_CSV` | La clave existe en el CSV pero no en el Resultado. |
+   | `SOLO_RESULTADO` | La clave existe en el Resultado para la matrícula del CSV pero no aparece en ese CSV. |
+
+   Las filas donde CSV y Resultado coinciden exactamente **no se reportan** (son el caso bueno).
+
+**Tolerancia**: cero. Cualquier diferencia, aunque sea de 0,01 horas, se reporta como `DIFERENCIA`. Si hay duplicados con la misma clave (en el CSV o en el Resultado), se **suman** antes de comparar.
+
+#### Salida
+
+Un fichero único `output/discrepancias_<yyyy-MM-dd_HHmmss>.xlsx` con una hoja `Discrepancias` y estas columnas:
+
+| Origen | Tipo | Petición | Matrícula | Función | Realizado Horas | PDCL + Deuda | Diferencia |
+|--------|------|----------|-----------|---------|----------------:|-------------:|-----------:|
+| 90014  | DIFERENCIA | 137791 | 90014 | RE | 5,00 | 4,00 | 1,00 |
+| 90054  | SOLO_CSV   | 136261 | 90054 | OT | 0,00 |      |      |
+| 90319  | SOLO_RESULTADO | 134764 | 90319 | SC |      | 12,50 |     |
+
+Las celdas numéricas que no aplican según el tipo (p. ej. `Diferencia` en una `SOLO_CSV`, donde no hay nada con qué restar) se dejan en **BLANK**, no en 0, para distinguirlas del valor cero legítimo. La fila de cabecera está congelada y todas las columnas auto-dimensionadas.
+
+El timestamp del nombre asegura que ejecuciones sucesivas no se sobrescriben: cada Opción 2 produce un fichero nuevo. No se mueve nada a `history/` (eso es solo del flujo de Opción 1).
+
+#### Ejemplo de uso
+
+```
+$ java -jar target/excel-merger-3.1.0-jar-with-dependencies.jar
+[banner ASCII]
+¿Que quieres hacer?
+
+  1) Fusion de Excel
+  2) Comprobador de discrepancias contra CSV
+  3) Salir sin hacer nada
+
+Selecciona una opcion [1-3]: 2
+
+=== Comprobador de discrepancias contra CSV externos ===
+
+Detectados 3 fichero(s) CSV en input:
+  - 90014.CSV
+  - 90054.CSV
+  - 90319.CSV
+
+Resultado cargado: 412 entradas (Matricula+Peticion+Funcion).
+
+Procesando 90014.CSV (origen=90014)...
+  -> 46 imputacion(es) leidas, 3 discrepancia(s).
+
+Procesando 90054.CSV (origen=90054)...
+  -> 1 imputacion(es) leidas, 0 discrepancia(s).
+
+Procesando 90319.CSV (origen=90319)...
+  -> 36 imputacion(es) leidas, 7 discrepancia(s).
+
+[OK] Excel de discrepancias generado: output/discrepancias_2026-05-04_103214.xlsx
+Total de discrepancias: 10
+
+Pulsa Enter para volver al menu...
+```
+
+#### Resolución de problemas
+
+- **"No se encontraron CSV en input/"**: coloca los exports del ERP (formato `<matricula>.CSV`) en `input/` y reintenta.
+- **"No se encuentra output/resultado_fusion.xlsx. Ejecuta primero la Opción 1"**: ejecuta primero la Opción 1 desde el mismo menú.
+- **"Cabecera inesperada en hoja 'Resultado'"**: el `resultado_fusion.xlsx` actual fue generado por una versión anterior de Excel Merger que tenía otro formato. Re-genera el Resultado con la Opción 1.
+- **Un CSV concreto da error pero los demás procesan**: el comparador no aborta el flujo entero por un CSV malo. El log muestra el error específico (cabecera faltante, fichero vacío, etc.) y los demás CSV siguen procesándose.
+- **Aparecen `SOLO_CSV` para casi todas las filas**: probablemente el `<matricula>.CSV` no se llama exactamente como la matrícula que aparece en su contenido. El cruce usa la matrícula del CSV (la del nombre del fichero) como filtro para `SOLO_RESULTADO`; si no coinciden con el contenido, todas las filas del CSV caen en `SOLO_CSV`.
 
 ## Flujo del programa
 

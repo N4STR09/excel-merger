@@ -11,10 +11,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,9 +34,22 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class InteractiveMenuTest {
 
-    /** Construye un menu con stdin simulado y captura de stdout. */
+    /**
+     * Construye un menu con stdin simulado y captura de stdout. El
+     * runner de la Opcion 2 por defecto devuelve {@link App#EXIT_OK} y
+     * no hace nada, util para tests que no estan mirando la Opcion 2.
+     * Para tests especificos de Opcion 2, usar
+     * {@link #harness(String, Function, IntSupplier)}.
+     */
     private static Harness harness(String stdinInput,
                                    Function<String, Integer> runner) throws IOException {
+        return harness(stdinInput, runner, () -> App.EXIT_OK);
+    }
+
+    /** Variante con runner explicito para Opcion 2. */
+    private static Harness harness(String stdinInput,
+                                   Function<String, Integer> optionOneRunner,
+                                   IntSupplier optionTwoRunner) throws IOException {
         ByteArrayInputStream in = new ByteArrayInputStream(
                 stdinInput.getBytes(StandardCharsets.UTF_8));
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -46,7 +58,8 @@ class InteractiveMenuTest {
         Terminal terminal = new DumbTerminal(
                 "test", "dumb", in, out, StandardCharsets.UTF_8);
         PrintStream printStream = new PrintStream(out, true, StandardCharsets.UTF_8);
-        InteractiveMenu menu = new InteractiveMenu(terminal, runner, printStream);
+        InteractiveMenu menu = new InteractiveMenu(
+                terminal, optionOneRunner, optionTwoRunner, printStream);
         return new Harness(menu, out, terminal);
     }
 
@@ -81,7 +94,7 @@ class InteractiveMenuTest {
         // no aparecen como string literal. Lo que SI aparece literal en
         // el output del banner es la version (linea final del ASCII) y
         // la linea descriptiva debajo.
-        assertThat(output).contains("v3.0.0");
+        assertThat(output).contains("v3.1.0");
         assertThat(output).contains("Fusion de exports ERP + Jira");
         // Verifica tambien que hay multiples lineas con caracter '|',
         // que es signature del ASCII art Figlet standard.
@@ -151,42 +164,76 @@ class InteractiveMenuTest {
     }
 
     // =================================================================
-    //  Opcion 2: placeholder
+    //  Opcion 2: comprobador de discrepancias (v3.1.0)
     // =================================================================
 
     @Test
-    void opcion2MuestraMensajePendienteYVuelveAlMenu() throws IOException {
-        // Tras la opcion 2 vuelve al menu; salimos con 3.
-        List<String> runnerCalls = new ArrayList<>();
-        Harness h = harness("2\n3\n", configPath -> {
-            runnerCalls.add("FUSION");
-            return App.EXIT_OK;
-        });
+    void opcion2InvocaElRunnerInyectadoYVuelveAlMenu() throws IOException {
+        // Tras pulsar 2 -> ejecuta runner -> espera Enter ("\n") -> menu
+        // de nuevo -> 3 (salir).
+        AtomicInteger calls = new AtomicInteger();
+        Harness h = harness("2\n\n3\n",
+                configPath -> {
+                    throw new AssertionError("Opcion 1 no debe ejecutarse");
+                },
+                () -> {
+                    calls.incrementAndGet();
+                    return App.EXIT_OK;
+                });
+
         int exitCode = h.menu.run();
 
         assertThat(exitCode).isEqualTo(App.EXIT_OK);
-        assertThat(runnerCalls).as("la fusion no debe haberse ejecutado").isEmpty();
-
+        assertThat(calls.get()).as("el runner de Opcion 2 debe haberse llamado una vez")
+                .isEqualTo(1);
+        // El menu se redibuja: la lista de opciones aparece >=2 veces.
         String output = h.capturedOutput();
-        assertThat(output).contains("Funcionalidad no disponible aun");
+        assertThat(output).contains("Comprobador de discrepancias contra CSV");
+        assertThat(output).contains("Pulsa Enter para volver al menu");
     }
 
     @Test
-    void opcion2NoTerminaElPrograma() throws IOException {
-        // Tres opcion 2 seguidas + salir.
-        Harness h = harness("2\n2\n2\n3\n", configPath -> App.EXIT_OK);
+    void opcion2NoTerminaElProgramaAunqueElRunnerFalle() throws IOException {
+        // El runner de Opcion 2 devuelve EXIT_INPUT_INVALID. El menu
+        // muestra el aviso, pide Enter, y vuelve al menu. Salimos con 3.
+        AtomicInteger calls = new AtomicInteger();
+        // Stdin: 2 -> runner falla -> Enter (aviso) -> Enter (volver) -> 3.
+        Harness h = harness("2\n\n\n3\n",
+                configPath -> App.EXIT_OK,
+                () -> {
+                    calls.incrementAndGet();
+                    return App.EXIT_INPUT_INVALID;
+                });
+
         int exitCode = h.menu.run();
+
+        // Importante: aunque el runner devolvio !=OK, el menu termina con
+        // EXIT_OK porque el usuario eligio Salir despues. Es decir, la
+        // Opcion 2 NO termina el programa.
         assertThat(exitCode).isEqualTo(App.EXIT_OK);
+        assertThat(calls.get()).isEqualTo(1);
 
         String output = h.capturedOutput();
-        // El mensaje de pendiente debe aparecer 3 veces.
-        int count = 0;
-        int idx = 0;
-        while ((idx = output.indexOf("Funcionalidad no disponible aun", idx)) != -1) {
-            count++;
-            idx++;
-        }
-        assertThat(count).isEqualTo(3);
+        assertThat(output).contains("[AVISO]");
+        assertThat(output).contains("codigo " + App.EXIT_INPUT_INVALID);
+    }
+
+    @Test
+    void opcion2MultipleVecesSeguidasInvocaElRunnerVariasVeces() throws IOException {
+        // Tres opcion 2 seguidas (con sus respectivos Enter para volver
+        // al menu) y luego salir con 3.
+        AtomicInteger calls = new AtomicInteger();
+        Harness h = harness("2\n\n2\n\n2\n\n3\n",
+                configPath -> App.EXIT_OK,
+                () -> {
+                    calls.incrementAndGet();
+                    return App.EXIT_OK;
+                });
+
+        int exitCode = h.menu.run();
+
+        assertThat(exitCode).isEqualTo(App.EXIT_OK);
+        assertThat(calls.get()).isEqualTo(3);
     }
 
     // =================================================================
