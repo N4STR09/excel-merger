@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Comparator;
 
 /**
  * Orquesta el flujo completo de la Opcion 2 del menu: comprobador de
@@ -170,6 +171,13 @@ public final class CompareRunner {
                 // Continua con el resto de CSVs en lugar de abortar todo.
             }
         }
+
+        all.sort(
+            Comparator
+                .comparing(Discrepancy::getPeticion, Comparator.nullsFirst(String::compareTo))
+                .thenComparing(Discrepancy::getMatricula)
+                .thenComparing(Discrepancy::getFuncion)
+        );
 
         // 5. Escribir Excel de salida.
         Path outFile = outputDir.resolve("discrepancias_"
