@@ -29,16 +29,17 @@ excel-merger/
 │   │   ├── ExcelMerger.java             # Orquestador de la fusión
 │   │   ├── FileProfileResolver.java     # Identifica cada Excel por su contenido
 │   │   ├── MesSheetBuilder.java         # Construye la hoja Resultado
+│   │   ├── EmptyRowFilter.java          # Elimina filas sin ningún dato (criterio ampliado en v3.2.0)
 │   │   ├── SummarySheetBuilder.java     # Hoja Resumen (sumatorio por matrícula)
 │   │   ├── DerivedSheetBuilder.java     # Hojas derivadas (fórmulas/agregación)
 │   │   └── LookupSheetBuilder.java      # Tablas de mapeo estáticas
 │   └── resources/
 │       └── config.properties            # Fallback empaquetado en el JAR
 ├── src/test/
-│   ├── java/com/excelmerger/            # Suite JUnit 5 (9 clases, 156 tests)
+│   ├── java/com/excelmerger/            # Suite JUnit 5 (31 clases, 484 tests)
 │   └── resources/
 │       ├── test-config.properties       # Config con placeholders para tests
-│       └── fixtures/                    # extraccion.xlsx, cierre.xlsx
+│       └── fixtures/                    # extraccion.xlsx, cierre.xlsx, deuda.xlsx
 └── gen_fixtures.py                      # Regenera los fixtures con openpyxl
 ```
 
@@ -65,7 +66,7 @@ O bien, si ya tienes Maven en el sistema:
 mvn clean package
 ```
 
-Genera `target/excel-merger-1.5.0-jar-with-dependencies.jar`.
+Genera `target/excel-merger-3.2.0-jar-with-dependencies.jar` (además del jar sin dependencias `target/excel-merger.jar`).
 
 ## Tests
 
@@ -95,7 +96,7 @@ El `verify` aplica además cuatro gates automáticos:
 
 ### Organización
 
-- **9 clases en `src/test/java/com/excelmerger/`**, 142 tests: `ConfigLoaderTest`, `ConfigValidatorTest`, `RunReportTest`, `FileProfileResolverTest`, `LookupSheetBuilderTest`, `MesSheetBuilderTest`, `DerivedSheetBuilderTest`, `AvisosSheetBuilderTest`, `ExcelMergerIntegrationTest`.
+- **31 clases y 484 tests** en `src/test/java/com/excelmerger/` y sus subpaquetes (`cli`, `compare`, `config`, `io`, `sheet.column`, `util`): `AppTest`, `AvisosSheetBuilderTest`, `ConfigLoaderTest`, `ConfigValidatorTest`, `DerivedSheetBuilderTest`, `EmptyRowFilterTest`, `ExcelMergerIntegrationTest`, `FileProfileResolverTest`, `LookupSheetBuilderTest`, `MainTest`, `MesSheetBuilderTest`, `OutputModeTest`, `ResponsablePivotBuilderTest`, `ResponsablesSheetBuilderTest`, `ResponsablesSheetBuilderV24Test`, `RunReportTest`, `SummarySheetBuilderTest`, `BannerPrinterTest`, `InteractiveMenuTest`, `CompareRunnerIntegrationTest`, `CsvParserTest`, `DiscrepancyComparatorTest`, `DiscrepancyExporterTest`, `ResultadoReaderTest`, `MesConfigSectionTest`, `SummaryConfigSectionTest`, `ValidationHelpersTest`, `FileLockDetectorTest`, `OutputManagerTest`, `FormulaPlusSumIfsColumnStrategyTest`, `PoiUtilsTest`.
 - **`TestFixtures.java`** es la utilidad compartida: copia los fixtures a un `@TempDir`, renderiza `test-config.properties` sustituyendo `${TEST_INPUT_DIR}` / `${TEST_OUTPUT_FILE}`, y ofrece `configFromProperties(...)` para tests unitarios que no tocan disco.
 - Todos los tests usan `@TempDir`; no hay efectos colaterales fuera del directorio temporal de cada caso.
 
@@ -112,10 +113,11 @@ La lógica de resolución de alias de entorno vive en batch, fuera de la red de 
 
 ### Fixtures
 
-`src/test/resources/fixtures/` contiene dos `.xlsx` versionados:
+`src/test/resources/fixtures/` contiene tres `.xlsx` versionados (más los CSV de `fixtures/csv/` que usa el paquete `compare`):
 
-- **`extraccion.xlsx`** — 14 peticiones válidas + 1 fila con `Peticion` vacía (para probar el skip por ancla vacía).
-- **`cierre.xlsx`** — 1 fila de metadatos + cabeceras en fila 2 + 16 imputaciones con totales conocidos (por ejemplo, `P-001` + `M-1001` suma 9 horas; así los tests de `SUMIFS` pueden asertar valores exactos).
+- **`extraccion.xlsx`** — hoja `Extraccion`: fila de título, cabeceras en la fila 2 y 26 imputaciones. Incluye las parejas sin contrapartida que alimentan los tests de huérfanos (`TICKETS`/`-` 8 h, `VACACIONES`/`90014` 3 h y `P-001`/`MAT-HUERFANO` 1 h) y dos imputaciones cuya `Funcion` no tiene contrapartida en `Cierre` (`P-001`/`M-1001`/`Sup` y `138074`/`99641`/`Sup`, 4 h cada una), que v3.2.0 recupera como filas huérfanas.
+- **`cierre.xlsx`** — hoja `Cierre`: cabeceras en la fila 1 y 20 filas de datos — 19 imputaciones con `Funcion=Dev` y totales conocidos (así los tests de `SUMIFS` pueden asertar valores exactos) más 1 fila con `Peticion` vacía, que prueba el skip por ancla vacía.
+- **`deuda.xlsx`** — hoja `Deuda`, cabeceras `Peticion | Matricula | Funcion | Horas` y 6 filas: una clave duplicada (`P-001`/`M-1001`/`Dev`, 5 + 2 h, para probar la agregación) y dos triples sin contrapartida en `Cierre` (`P-999`/`M-9999`/`Dev` 100 h y `P-010`/`-`/`Dev` 4 h), que alimentan los tests de huérfanos de `Deuda` de v3.2.0.
 
 Para regenerarlos desde cero (por ejemplo si cambian las cabeceras esperadas en los perfiles):
 
@@ -137,7 +139,7 @@ A partir de v3.0.0 el JAR muestra **siempre** un menú interactivo al arrancar. 
 Al ejecutar:
 
 ```bash
-java -jar target/excel-merger-3.1.0-jar-with-dependencies.jar
+java -jar target/excel-merger-3.2.0-jar-with-dependencies.jar
 ```
 
 aparece algo así:
@@ -148,7 +150,7 @@ aparece algo así:
  |  _| \ \/ / __/ _ \ | | | |\/| |/ _ \ '__/ _` |/ _ \ '__|
  | |___ >  < (_|  __/ | | | |  | |  __/ | | (_| |  __/ |
  |_____/_/\_\___\___| |_| |_|  |_|\___|_|  \__, |\___|_|
-                                           |___/     v3.1.0
+                                           |___/     v3.2.0
 
  Fusion de exports ERP + Jira para cierre mensual
 
@@ -270,7 +272,7 @@ El timestamp del nombre asegura que ejecuciones sucesivas no se sobrescriben: ca
 #### Ejemplo de uso
 
 ```
-$ java -jar target/excel-merger-3.1.0-jar-with-dependencies.jar
+$ java -jar target/excel-merger-3.2.0-jar-with-dependencies.jar
 [banner ASCII]
 ¿Que quieres hacer?
 
@@ -544,6 +546,8 @@ A partir de v2.2.0, el programa acepta un **tercer fichero Excel opcional** en `
 - `PDCL + Deuda == PDCL` para todas las filas → la regla `redIfNotEqualTo=PDCL` no pinta nada de rojo (identidad).
 - **No se emite ningún warning**. El degradado es silencioso por diseño: si tu empresa todavía no usa el fichero de Deuda, los `_Avisos` quedarían contaminados de warnings sin valor.
 
+**Horas de Deuda sin contrapartida (v3.2.0).** Si `mes.orphans.enabled=true`, las horas de `Deuda` cuyo triple no tiene fila equivalente en `Resultado` no se pierden: se añaden como filas huérfanas con sus propios criterios de `SUMIFS` (ver *Filas huérfanas en Resultado*, más abajo). Con `mes.orphans.enabled=false` se comporta como en v2.x.
+
 **Posición en el libro de salida.** `Cierre, Extraccion, [Deuda si existe,] Equipos (oculta), Resultado, Resumen, [_Avisos si opt-in]`. Orden garantizado por `merge.profileOrder` (default `Cierre,Extraccion,Deuda`) independientemente del orden alfabético de los ficheros en `input/`.
 
 ### Hoja Resultado
@@ -571,10 +575,10 @@ mes.sourceSheet=Cierre
 mes.sourceHeaderRow=1
 mes.anchorColumn=Peticion
 
-# v2.7.1: filtrado de filas con las 5 columnas numéricas (Jira, Facturar,
-# PDCL, PDCL + Deuda, Horas_Mes) evaluando todas a 0. La fila se elimina
-# físicamente del libro de salida. Default: true. Para volver al
-# comportamiento de v2.7.0 (no filtrar nada), poner a false.
+# v3.2.0: la fila solo se elimina si TODAS sus celdas evalúan a vacío o 0
+# (antes, v2.7.1, se miraban únicamente 5 columnas numéricas y podían
+# descartarse filas que aún tenían datos). La eliminación es física en el
+# libro de salida. Default: true. Para no filtrar nada, poner a false.
 mes.removeEmptyRows=true
 
 mes.col.1.name=Petición
@@ -613,6 +617,48 @@ mes.col.13.redIfNotEqualTo=PDCL
 En el ejemplo anterior, `PDCL` aparece sobre fondo verde muy claro y `PDCL + Deuda` sobre fondo verde un tono más oscuro; además, cualquier celda de `PDCL + Deuda` cuyo valor no coincida con el de `PDCL` en la misma fila se pinta en rojo claro, como alerta visual de modificaciones manuales.
 
 **Columna `Funcion` (v2.1.0)**: tras `Matrícula`, se añade una columna `Funcion` que se copia tal cual desde `Cierre.Funcion`. En `Cierre`, una misma matrícula puede aparecer en varias peticiones con funciones distintas (`AN`, `DI`, `PR`, `OT`, `IN`, `RE`, `SC`, `TE`, ...); cada petición es su propia fila en `Resultado`, y cada fila expone su propia función. No hay agregación ni concatenación: si la matrícula `M-1001` tiene 3 peticiones con funciones `AN`, `DI` y `PR`, aparecen 3 filas en `Resultado` con esa matrícula, una por función. El literal `"-"` del origen se preserva sin normalizar.
+
+### Filas huérfanas en Resultado (v1.7.0, ampliado en v3.2.0)
+
+Cuando `mes.orphans.enabled=true` (default `false`; en el `config.properties` de producción está activo), `Resultado` no solo contiene las filas de `Cierre`: añade dos tipos de fila huérfana. Las claves son las de v1.7.0, sin novedades:
+
+```properties
+mes.orphans.enabled=true
+mes.orphans.sourceSheet=Extraccion      # hoja origen de las imputaciones
+mes.orphans.matchComponent=Component Name
+mes.orphans.matchMatricula=Matricula
+mes.orphans.sumColumn=Hours
+mes.orphans.colPeticion=Petición         # columnas MES de las huérfanas de Extracción
+mes.orphans.colMatricula=Matrícula
+mes.orphans.colJira=Jira
+```
+
+Con la llave a `false` el comportamiento es el de v2.x: solo se generan filas de `Cierre` (y sigue aplicándose la corrección del filtro de filas vacías descrita arriba).
+
+**1. Huérfanas de `Extracción` — una fila por pareja (v1.7.0, gate ampliado en v3.2.0).**
+
+Una imputación es huérfana si se cumple cualquiera de estas dos condiciones:
+
+- su pareja `(Component Name, Matricula)` no existe en `Cierre` como `(Peticion, Recurso)` — gate histórico de v1.7.0; **o**
+- su triple `(Component Name, Matricula, Funcion)` en minúsculas no existe en `Cierre` como `(Peticion, Recurso, Funcion)` — **nuevo en v3.2.0**: recupera las imputaciones cuya `Funcion` no tiene contrapartida (p. ej. `Sup` cuando `Cierre` solo tiene `Dev`), que el `SUMIFS` de `Jira` tampoco suma y que antes no aparecían en ningún sitio.
+
+Las horas se siguen agregando **por pareja** (una sola fila por pareja) y la fila se rellena así: `Petición` y `Matrícula` = claves de la pareja, `Funcion` = `"-"`, `Jira` = horas agregadas, columnas `FORMULA` y `FORMULA_PLUS_SUMIFS` (`Equipo`, `Facturar`, `PDCL`, `PDCL + Deuda`) evaluadas sobre esa misma fila, y `"-"` en el resto (`Estado`, `Res. Tecnico`, `Horas_RealizadoTot`, `Horas_Mes`, ...).
+
+Si falta la columna `Funcion` (literal) en `Extracción` o en `Cierre`, se emite un warning `CABECERA` y la sección degrada al gate por pareja puro (v1.7.0 exacto). El resto de degradaciones no cambian: si falta la hoja `mes.orphans.sourceSheet` se emite un warning `HOJA` y la sección se omite; si faltan `matchComponent`/`matchMatricula`/`sumColumn`, warning `CABECERA` y se omite; y si `Cierre` no tiene `Peticion`/`Recurso`, warning `CABECERA` y claves vacías.
+
+**2. Huérfanas de `Deuda` — una fila por triple (nuevo en v3.2.0).**
+
+Las horas de la hoja `Deuda` cuyo triple `(Peticion, Matricula, Funcion)` no tiene fila equivalente en `Resultado` tampoco se pierden. El gate son los triples de `Cierre` ∪ las parejas huérfanas de `Extracción` (con `Funcion` = `"-"`, porque esas horas ya las suma su propia fila) ∪ los triples de `Deuda` ya emitidos. La fila resultante se rellena así:
+
+- `Petición`, `Matrícula` y `Función` = valores del triple de `Deuda`, escritos en las columnas MES que declara el `match` de la columna `FORMULA_PLUS_SUMIFS` (`Peticion:Petición, Matricula:Matrícula, Funcion:Funcion`), para que el `SUMIFS` de la propia fila cruce contra ella;
+- `Jira` = `0` numérico (no son imputaciones de Jira; si no, `Facturar`/`PDCL` evaluarían `#VALUE!`);
+- `Facturar` y `PDCL` = sus fórmulas sobre esa fila (evalúan a 0);
+- `PDCL + Deuda` = su `FORMULA_PLUS_SUMIFS` con los criterios de su propia fila: **de ahí salen las horas de deuda**;
+- resto de columnas = `"-"`.
+
+No requiere ninguna clave de config nueva: `from`/`sum`/`match` se leen de la columna configurada con `mes.col.N.type=FORMULA_PLUS_SUMIFS`. El paso se omite en silencio si no hay tal columna, si su `match` no cubre los tres criterios `Peticion`/`Matricula`/`Funcion`, si `Cierre` no tiene columna `Funcion` o si no existe la hoja `Deuda` (mismo degradado silencioso que la propia columna, v2.2.0); si `Deuda` existe pero sus cabeceras no cuadran, se emite un warning `CABECERA`. Las filas de `Deuda` con `Peticion` vacía y los triples con 0 horas se descartan: no hay dato que representar.
+
+`ConfigValidator` valida las claves `mes.orphans.*` solo cuando la llave está activa: la hoja declarada existe, `mes.orphans.colPeticion`/`colMatricula`/`colJira` corresponden a columnas definidas en `mes.col.N.name` y `mes.enabled` tiene que estar a `true`. `matchComponent`, `matchMatricula` y `sumColumn` no se validan contra el config (dependen del contenido del Excel) y el builder avisa en runtime si no los encuentra.
 
 ### Hojas de lookup
 

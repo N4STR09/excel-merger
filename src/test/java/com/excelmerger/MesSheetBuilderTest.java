@@ -426,10 +426,16 @@ class MesSheetBuilderTest {
         // MesColumn.fromConfig degrada COPY sin 'from' a EMPTY directamente,
         // pero COPY con 'from' que no existe en la hoja origen produce una
         // celda BLANK (via preValidate disabled + writeCell blank) y un warning.
+        //
+        // La unica celda de la fila de datos acaba BLANK, asi que con el
+        // criterio corregido del filtro (fila vacia = TODAS las celdas vacias
+        // o a 0) la fila se eliminaria y no se podria observar la celda.
+        // Desactivamos el filtro para comprobar la degradacion a BLANK.
         Properties p = baseMesConfig();
         p.setProperty("mes.col.1.name", "X");
         p.setProperty("mes.col.1.type", "COPY");
         p.setProperty("mes.col.1.from", "NoExiste");
+        p.setProperty("mes.removeEmptyRows", "false");
 
         ConfigLoader cfg = TestFixtures.configFromProperties(p);
         RunReport report = new RunReport();
@@ -443,6 +449,31 @@ class MesSheetBuilderTest {
 
         assertThat(report.warnings()).anyMatch(w ->
                 "CABECERA".equals(w.category) && w.message.contains("NoExiste"));
+    }
+
+    @Test
+    void filaDeDatosCuyaUnicaCeldaEsVaciaSeEliminaConElFiltroActivo() throws Exception {
+        // Con mes.removeEmptyRows=true (default), una fila de datos que solo
+        // contiene celdas vacias (COPY degradado a BLANK por columna
+        // inexistente) se elimina fisicamente: no aporta ningun dato.
+        // Antes de la correccion el filtro se abstenia porque las 5 columnas
+        // nombradas no existian en la cabecera; el criterio corregido no
+        // depende de nombres concretos de columna.
+        Properties p = baseMesConfig();
+        p.setProperty("mes.col.1.name", "X");
+        p.setProperty("mes.col.1.type", "COPY");
+        p.setProperty("mes.col.1.from", "NoExiste");
+
+        ConfigLoader cfg = TestFixtures.configFromProperties(p);
+        RunReport report = new RunReport();
+
+        try (Workbook wb = buildSourceWorkbook("P-1")) {
+            new MesSheetBuilder(cfg, report).build(wb);
+
+            Sheet mes = wb.getSheet("MES");
+            assertThat(mes).isNotNull();
+            assertThat(mes.getRow(1)).isNull();
+        }
     }
 
     // ==================================================================

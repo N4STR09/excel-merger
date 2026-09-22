@@ -1,5 +1,74 @@
 # Changelog
 
+## [3.2.0] — Corrección del error de diseño que descartaba datos en la fusión
+
+Versión menor. Corrige un **error de diseño** por el que la fusión **descartaba datos presentes en los ficheros de entrada** en tres puntos distintos de la hoja `Resultado`. **Sin BREAKING**: no se añaden ni se eliminan claves de `config.properties`, el menú, los códigos de salida y la estructura del libro no cambian, y el cambio es **exclusivamente aditivo** — ninguna fila con datos del output anterior desaparece ni cambia de valor; lo único que se recupera son datos que antes se perdían (más las filas **totalmente vacías**, que ahora también se eliminan en configs sin las 5 columnas numéricas; ver *Migración*).
+
+### Corregido
+
+- **`EmptyRowFilter` eliminaba filas que aún contenían datos** (criterio introducido en v2.7.1). El filtro exigía solo que **5 columnas numéricas** (`Jira`, `Facturar`, `PDCL`, `PDCL + Deuda`, `Horas_Mes`) evaluaran a 0 e ignoraba el resto de columnas: una fila con petición, aplicación, título, estado, responsable, `Horas_RealizadoTot`… desaparecía físicamente del libro de salida si esas 5 columnas valían 0. **Nuevo criterio**: la fila solo se elimina si **TODAS** sus celdas evalúan a vacío o 0, con anchura `max(cabecera, fila)` para que también cuenten las celdas que sobresalgan de la cabecera. Una celda "vale 0" si es BLANK/inexistente, numérica `0.0`, o string vacía, sentinela `"-"` o numérico `0`/`0,00` con punto **o** coma decimal (cubre `Horas_Mes`, que el ERP serializa como texto). Booleanos, errores, fórmulas no evaluables y cualquier otro texto conservan la fila: criterio conservador, ante la duda no se filtra.
+
+  - Eliminados `EMPTY_ROW_COLUMN_NAMES`, `emptyRowColumnNames()` y el warning `CONFIG` de "5 columnas no encontradas", que además hacía que el filtro **se abstuviera** de filtrar en configs que no tenían esas columnas.
+  - Sobre los datos reales, el criterio antiguo eliminaba **219 de las 863 filas** generadas (10.506,00 h de `Horas_RealizadoTot`); el nuevo no elimina ninguna de esas 863.
+  - Cuando la config sí define las 5 columnas, el criterio nuevo es un **subconjunto** del antiguo: cualquier fila que elimina el nuevo también la eliminaba el antiguo, así que el cambio solo puede **recuperar** filas.
+
+- **Huérfanos de `Extracción` con `Función` sin contrapartida** (gate histórico de v1.7.0 ampliado). Antes solo era huérfana una imputación cuya **pareja** `(Component Name, Matricula)` no existía en `Cierre` como `(Peticion, Recurso)`. Si la pareja existía pero con otra `Función` (p. ej. imputaciones `Sup` cuando en `Cierre` solo hay `Dev`), esas horas no sumaban en el `SUMIFS` de `Jira` **ni** se reflejaban en ninguna otra fila: se descartaban. **Nuevo gate aditivo**: además de la pareja, es huérfana si su triple `(CN, Matricula, Funcion)` en minúsculas no existe como `(Peticion, Recurso, Funcion)` en `Cierre` — `toLowerCase(Locale.ROOT)` sin `trim`, replicando la insensibilidad de caja (pero no de espacios) del `SUMIFS` de Excel. El resto del comportamiento no cambia: las horas se siguen agregando **por pareja** (una fila por pareja, `Funcion` = `"-"`, `Jira` = horas agregadas, columnas `FORMULA` y `FORMULA_PLUS_SUMIFS` evaluadas sobre esa misma fila y `"-"` en el resto).
+
+  - Si falta la columna `Funcion` (literal, sin claves de config nuevas) en `Extracción` o en `Cierre`, se emite warning `CABECERA` y se degrada al gate por pareja puro (v1.7.0 exacto).
+
+- **Horas de la hoja `Deuda` sin contrapartida en `Resultado`**. El `SUMIFS` de `PDCL + Deuda` solo suma sobre las filas que ya existen; los triples de `Deuda` sin fila equivalente en `Resultado` no se reflejaban en ningún sitio (tampoco las huérfanas de `Extracción` con `Funcion` = `"-"`, cuyo propio `SUMIFS` contra `Deuda` no encuentra esa combinación). **Nuevo paso `collectDeudaOrphans`** — solo con `mes.orphans.enabled=true`, la misma llave de v1.7.0, **sin claves nuevas** — que emite **una fila huérfana por triple** de `Deuda`:
+
+  - **Gate**: triples de `Cierre` (minúsculas) ∪ parejas huérfanas de `Extracción` con `Funcion` = `"-"` (esas horas ya las suma su propia fila) ∪ triples de `Deuda` ya emitidos (una sola fila por triple).
+  - **Contenido de la fila**: `Petición`/`Matrícula`/`Función` = valores del triple de `Deuda` (nombres de columna derivados del `match`); `Jira` = `0` numérico — no son imputaciones de Jira y, si no, `Facturar`/`PDCL` evaluarían `#VALUE!`; columnas `FORMULA` se evalúan con su plantilla sobre la propia fila; `PDCL + Deuda` aporta las horas vía su `FORMULA_PLUS_SUMIFS` **con los criterios de su propia fila**; el resto de columnas = `"-"`.
+  - **Derivación sin config nueva (`DeudaRef`)**: se escanean las `mes.col.N.*` buscando `type=FORMULA_PLUS_SUMIFS` (la de `PDCL + Deuda`) y se reutilizan su `from`/`sum`/`match`, extrayendo de ahí los roles `Peticion`/`Matricula`/`Funcion` (lado remoto) y sus nombres de columna MES (lado local).
+  - **Degradaciones**: sin columna `FORMULA_PLUS_SUMIFS`, con `match` incompleto, sin columna `Funcion` en `Cierre` o sin hoja `Deuda` → paso omitido (silencioso en el caso de hoja ausente: mismo degradado que la propia columna, ver v2.2.0); warning `CABECERA` si la hoja `Deuda` existe pero sus cabeceras no cuadran. Se descartan las filas de `Deuda` con `Peticion` vacía (pie de tabla) y los triples con horas totales a 0: no hay dato que representar.
+  - **Agregación**: una sola fila por triple en minúsculas — las variantes de caja de un mismo triple se funden, coherente con el `SUMIFS` case-insensitive de Excel — conservando la forma original de la primera fila para escribir las claves.
+
+### Cambiado
+
+- **Orden de construcción en `MesSheetBuilder.build()`**: filas de `Cierre` → `loadSourceKeys` (parejas exactas + triples en minúsculas de `Cierre`, calculadas una sola vez y compartidas por ambos tipos de huérfanos) → `resolveDeudaRef` → huérfanos de `Extracción` → huérfanos de `Deuda` → **un único `sort` estable** que coloca las huérfanas en su sitio sin alterar el orden relativo de las filas de `Cierre`.
+- **Comentario de `mes.removeEmptyRows`** actualizado en los tres `config.properties` (raíz, `src/main/resources` y `src/test/resources`) para describir el nuevo criterio. **Sin claves de config nuevas ni eliminadas.**
+- Limpieza menor obligada por los gates: constante `PROP_PREFIX_MES_COL` extraída en `MesSheetBuilder` (PMD `AvoidDuplicateLiterals`) y parámetro sin uso `sourceHeaderRow0` eliminado de `collectOrphans`.
+- **`Main.APP_VERSION`** → `"3.2.0"` y **`pom.xml`** → `3.2.0`. El banner ASCII se actualiza automáticamente porque `BannerPrinter` lo lee de esa constante; el fat-jar pasa a llamarse `excel-merger-3.2.0-jar-with-dependencies.jar` (`.gitignore`, `run.bat` y `README.md` actualizados en consecuencia; `run.bat` localiza el JAR por wildcard, así que no depende de la versión).
+
+### Tests
+
+- **484 tests, 0 fallos** en 31 clases. `mvn verify` en verde: PMD 0, SpotBugs 0, checkstyle OK, Spotless y JaCoCo (≥70% INSTRUCTION) sin novedades ni supresiones nuevas.
+- **Nuevos**: `orphansEnabledAnadeHuerfanosParaFuncionSinContrapartida` y `orphansEnabledConDeudaRecuperaHorasDeTriplesSinContrapartida` (integración; el total de huérfanas de `Extracción` pasa de 23 a 25 y de 25 a 27 al sumar las de `Deuda`), `filaDeDatosCuyaUnicaCeldaEsVaciaSeEliminaConElFiltroActivo` (ancla el nuevo criterio) y los `apply*` reescritos de `EmptyRowFilterTest` (28 tests).
+- **Retirados** por fijar el criterio antiguo: `applyConColumnasFaltantesEmiteWarningYNoFiltra`, `applyFiltraFilasConTodasLasCincoColumnasACero` y `applySinFilasACeroNoElimina`.
+- **Ajustados**: `copyColumnaInexistenteDegradaAEmpty` — su única celda de datos es BLANK, así que con el filtro activo la fila queda vacía y se elimina (que es exactamente el nuevo comportamiento); el test la observa poniendo `mes.removeEmptyRows=false`. Y los `v271*` de integración: `P-099` (datos de texto útiles con las columnas numéricas a 0) **ya no** se elimina, `M-9999` sí aparece en `Resumen` y se genera la hoja de la responsable `trespFiltro@x`.
+
+### Verificación con datos reales
+
+Ejecución con el `config.properties` de producción sobre el `input/` real, comparando la salida anterior (baseline) contra la salida corregida:
+
+| Métrica | Antes | Después | Δ |
+| --- | ---: | ---: | --- |
+| Filas de `Resultado` | 644 | 925 | **+281** (219 recuperadas por el filtro + 31 huérfanas de `Extracción` + 31 huérfanas de `Deuda`) |
+| `Horas_RealizadoTot` | 59.109,70 | 69.615,70 | **+10.506,00** (las 219 filas recuperadas) |
+| `Jira` | 4.728,99 | 5.320,74 | **+591,75** (mismatch de `Función`) |
+| `Facturar` / `PDCL` | 5.674,79 | 6.384,89 | **+710,10** (= 591,75 × 1,2) |
+| Deuda en `PDCL + Deuda` (`PDCL + Deuda` − `PDCL`) | 101.881,42 | 103.525,00 | **+1.643,58** (triples de `Deuda` sin contrapartida) |
+| `Horas_Mes` | 3.127,50 | 3.127,50 | sin cambios |
+
+**Comprobación de aditividad**: las 644 filas de la baseline aparecen en la salida nueva con **valores evaluados idénticos**; las hojas `Cierre`, `Extracción`, `Deuda` y `Equipos` son idénticas; `Resumen` conserva las mismas 20 filas y claves, con sumas que solo suben por los importes de la tabla.
+
+### Migración
+
+- **Ninguna en la config ni en la CLI**: sin claves nuevas o eliminadas y sin cambios de códigos de salida. `mes.removeEmptyRows=false` sigue desactivando el filtro por completo (comportamiento v2.7.0) y `mes.orphans.enabled=false` sigue sin emitir ninguna fila huérfana — en ese caso solo se aplica la corrección del filtro.
+- Los totales **suben**: `Horas_RealizadoTot`, `Jira`, `Facturar`, `PDCL` y la componente Deuda de `PDCL + Deuda` incorporan las horas que antes se descartaban. Si cruzas el output con el ERP, los descuadres "a la baja" del output anterior eran datos perdidos.
+- **Único caso no aditivo**: si tu config **no** define las 5 columnas numéricas, antes el filtro se abstentía (warning `CONFIG`) y no eliminaba nada; ahora las filas **totalmente vacías** sí se eliminan. No se pierde información (están vacías), pero si quieres conservar exactamente el comportamiento anterior, pon `mes.removeEmptyRows=false`.
+
+### Decisiones tomadas y descartadas
+
+- **Sobre-conteo de triples duplicados en el `SUMIFS` de `Deuda`** (si `Deuda` repite un triple y `Resultado` tiene varias filas con ese triple, cada fila suma el total del triple): **fuera de alcance**. Es un efecto pre-existente de v2.2.0, este cambio no lo introduce ni lo empeora, y corregirlo alteraría totales existentes — justo lo que este release promete no hacer.
+- **Hacer configurables las 5 columnas numéricas del filtro** (`mes.emptyRowColumns`): **descartado** a favor del criterio "todas las celdas", que no necesita configuración y por definición no puede perder datos.
+- **Claves nuevas para las huérfanas de `Deuda`** (p. ej. `mes.orphans.deuda*`): **descartado**; se deriva todo de la config de columnas ya existente, una llave menos que mantener y validar en `OrphansConfigSection`.
+- **Exigir la columna `Funcion` en `Extracción`/`Cierre`**: **descartado**; las configs antiguas sin esa columna siguen funcionando con el gate por pareja más el warning `CABECERA`.
+- **Emitir una fila huérfana de `Extracción` por triple en lugar de por pareja**: **descartado**; cambiaría el comportamiento publicado de agrupación de v1.7.0 y multiplicaría filas sin recuperar ningún dato adicional.
+
+---
+
 ## [3.1.0] — Opción 2 del menú: comprobador de discrepancias contra CSV del ERP
 
 Versión menor. Implementa la Opción 2 del menú interactivo de v3.0.0, que en aquella versión era un placeholder (`Funcionalidad no disponible aun…`). La nueva opción cruza los CSV exportados por el ERP contra el `output/resultado_fusion.xlsx` generado por la Opción 1 y produce un Excel con las discrepancias detectadas. **No hay BREAKING**: todo lo de v3.0.0 sigue funcionando idéntico.

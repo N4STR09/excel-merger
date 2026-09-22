@@ -1,7 +1,5 @@
 package com.excelmerger;
 
-import com.excelmerger.util.PoiUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,37 +11,48 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
- * v2.7.1 — Filtra de la hoja {@code Resultado} las filas en las que las 5
- * columnas numericas relevantes (Jira, Facturar, PDCL, PDCL + Deuda y
- * Horas_Mes) evaluan TODAS a {@code 0}. Las filas se eliminan FISICAMENTE
- * del workbook (no son ocultacion via {@code setZeroHeight}).
+ * Filtra de la hoja {@code Resultado} las filas que no contienen NINGUN
+ * dato: aquellas en las que TODAS las celdas de la fila evaluan a
+ * "vacio o 0". Las filas se eliminan FISICAMENTE del workbook (no es
+ * ocultacion via {@code setZeroHeight}).
  *
  * <p>Activacion: clave {@code mes.removeEmptyRows} (default {@code true}).
- * Si la clave esta a {@code false}, el comportamiento es identico al de
- * v2.7.0 (no se filtra nada).</p>
+ * Si la clave esta a {@code false}, no se filtra nada.</p>
+ *
+ * <h2>Correccion de diseno (perdida de datos)</h2>
+ *
+ * <p>Hasta ahora el filtro exigia unicamente que 5 columnas numericas
+ * (Jira, Facturar, PDCL, PDCL + Deuda, Horas_Mes) valieran 0 e ignoraba
+ * el resto de columnas. En datos reales eso eliminaba filas que aun
+ * contenian datos utiles (peticion, titulo, estado, responsable, horas
+ * realizadas...), descartandolos para siempre. El criterio correcto es:
+ * solo una fila cuyas celdas son todas vacias o 0 es prescindible.</p>
+ *
+ * <p>El criterio nuevo es un subconjunto estricto del antiguo: cualquier
+ * fila que el filtro nuevo elimina (todo a 0) tambien lo eliminaba el
+ * antiguo (sus 5 columnas tambien eran 0), y ninguna fila que el antiguo
+ * conservara pasa a eliminarse. Es decir, el cambio solo puede
+ * RECUPERAR filas, nunca perder otras nuevas.</p>
  *
  * <h2>Por que post-build con FormulaEvaluator</h2>
  *
- * <p>Las 5 columnas son fundamentalmente formulas (SUMIFS para Jira,
+ * <p>Varias columnas son fundamentalmente formulas (SUMIFS para Jira,
  * FORMULA {@code {col:Jira}*1.2} para Facturar y PDCL,
- * FORMULA_PLUS_SUMIFS para PDCL + Deuda; Horas_Mes es un COPY directo
- * desde la hoja origen pero puede ser numerico o vacio). Replicar la
- * logica de los SUMIFS y de las multiplicaciones en Java seria deuda
- * tecnica que duplicaria reglas: si manyana cambia una formula en
- * config.properties, el filtrado divergiria. Usando FormulaEvaluator,
- * la "verdad" es exactamente lo que Excel calculara al abrir el fichero.
- * Es tambien coherente con la regla inquebrantable 4 (los tests usan
+ * FORMULA_PLUS_SUMIFS para PDCL + Deuda). Replicar la logica de los
+ * SUMIFS y de las multiplicaciones en Java seria deuda tecnica que
+ * duplicaria reglas: si manyana cambia una formula en config.properties,
+ * el filtrado divergiria. Usando FormulaEvaluator, la "verdad" es
+ * exactamente lo que Excel calculara al abrir el fichero. Es tambien
+ * coherente con la regla inquebrantable 4 (los tests usan
  * FormulaEvaluator para todo lo que involucre formulas).</p>
  *
- * <h2>Criterio "vale 0"</h2>
+ * <h2>Criterio "vale 0" (por celda)</h2>
  *
- * <p>Una columna se considera "vale 0" si:</p>
+ * <p>Una celda se considera "vale 0" si:</p>
  * <ul>
  *   <li>la celda es {@code BLANK} o no existe;</li>
  *   <li>la celda evalua a {@code NUMERIC} con valor exactamente {@code 0.0};</li>
@@ -58,6 +67,10 @@ import java.util.Set;
  * <p>Cualquier otra evaluacion (NUMERIC distinto de 0, STRING con texto,
  * BOOLEAN, ERROR) cuenta como "no es 0" y por tanto la fila NO se filtra.
  * El criterio es conservador: ante la duda, conservar la fila.</p>
+ *
+ * <p>Se evaluan TODAS las columnas de la fila, con anchura
+ * {@code max(cabecera, fila)} para no ignorar celdas que sobresalgan de
+ * la cabecera (o al reves).</p>
  *
  * <h2>Mecanica de eliminacion</h2>
  *
@@ -97,18 +110,10 @@ final class EmptyRowFilter {
     private static final Logger log = LoggerFactory.getLogger(EmptyRowFilter.class);
 
     /**
-     * Nombres de las 5 columnas (en {@code mes.col.N.name}) que componen
-     * el criterio AND de "fila vacia". Cableado en v2.7.1 (decision Fase 0,
-     * P7); si en el futuro hace falta parametrizar, sera por una clave nueva
-     * tipo {@code mes.emptyRowColumns=...} sin romper retrocompatibilidad.
-     */
-    static final List<String> EMPTY_ROW_COLUMN_NAMES = List.of(
-            "Jira", "Facturar", "PDCL", "PDCL + Deuda", "Horas_Mes");
-
-    /**
-     * Categoria de warning emitida en RunReport cuando alguna de las 5
-     * columnas no existe en el config actual. Se usa la categoria CONFIG
-     * existente en lugar de crear una nueva, para no sumar ruido.
+     * Categoria de warning emitida en RunReport cuando algo falla durante
+     * el filtrado (evaluador de formulas no disponible). Se usa la
+     * categoria CONFIG existente en lugar de crear una nueva, para no
+     * sumar ruido.
      */
     private static final String WARN_CATEGORY = "CONFIG";
 
@@ -117,9 +122,10 @@ final class EmptyRowFilter {
     }
 
     /**
-     * Aplica el filtro a la hoja {@code mes}. Si las 5 columnas no se
-     * encuentran (todas o algunas), emite un warning y no filtra nada
-     * (fail-safe: ante config no estandar, mantener comportamiento v2.7.0).
+     * Aplica el filtro a la hoja {@code mes}. Solo se eliminan filas en las
+     * que TODAS las celdas (todas las columnas, anchura = union de
+     * cabecera y fila) evaluan a vacio o 0. Si la hoja no tiene datos o
+     * no hay cabecera, no hace nada.
      *
      * @param workbook libro destino (necesario para crear FormulaEvaluator).
      * @param mes hoja Resultado ya construida (cabecera en fila 0, datos en
@@ -137,27 +143,6 @@ final class EmptyRowFilter {
         }
         Row header = mes.getRow(0);
         if (header == null) {
-            return 0;
-        }
-
-        // Resolver indices de las 5 columnas por nombre. Si alguna falta,
-        // warning y abortar el filtrado (no es seguro filtrar parcialmente).
-        int[] colIdx = new int[EMPTY_ROW_COLUMN_NAMES.size()];
-        List<String> missing = new ArrayList<>();
-        for (int i = 0; i < EMPTY_ROW_COLUMN_NAMES.size(); i++) {
-            String name = EMPTY_ROW_COLUMN_NAMES.get(i);
-            int idx = PoiUtils.findColumnIndex(header, name);
-            colIdx[i] = idx;
-            if (idx < 0) {
-                missing.add(name);
-            }
-        }
-        if (!missing.isEmpty()) {
-            String msg = "mes.removeEmptyRows=true pero no se encontraron las columnas "
-                    + missing + " en la hoja '" + mes.getSheetName()
-                    + "'. Filtrado de filas vacias omitido (comportamiento v2.7.0).";
-            log.warn("{}", msg);
-            report.addWarning(WARN_CATEGORY, msg);
             return 0;
         }
 
@@ -180,12 +165,22 @@ final class EmptyRowFilter {
             return 0;
         }
 
+        // Anchura a evaluar: union de la cabecera y de todas las filas de
+        // datos, para no ignorar celdas que sobresalgan de una u otra.
+        int width = Math.max(0, header.getLastCellNum());
+        for (int r = 1; r <= lastDataRow; r++) {
+            Row row = mes.getRow(r);
+            if (row != null) {
+                width = Math.max(width, row.getLastCellNum());
+            }
+        }
+
         // Identificar filas a eliminar (set de indices 0-based).
         Set<Integer> toRemove = new LinkedHashSet<>();
         for (int r = 1; r <= lastDataRow; r++) {
             Row row = mes.getRow(r);
             if (row == null) continue;
-            if (rowHasAllZeroes(row, colIdx, evaluator)) {
+            if (rowHasAllEmptyCells(row, width, evaluator)) {
                 toRemove.add(r);
             }
         }
@@ -196,19 +191,20 @@ final class EmptyRowFilter {
         // Compactar: copiar filas supervivientes hacia arriba.
         compactRows(mes, lastDataRow, toRemove);
 
-        log.info("[EmptyRowFilter] {} fila(s) eliminadas de '{}' por tener las 5 columnas {} a 0.",
-                toRemove.size(), mes.getSheetName(), EMPTY_ROW_COLUMN_NAMES);
+        log.info("[EmptyRowFilter] {} fila(s) eliminadas de '{}' por tener todas sus celdas vacias o a 0.",
+                toRemove.size(), mes.getSheetName());
         return toRemove.size();
     }
 
     /**
-     * Devuelve {@code true} sii TODAS las celdas indicadas en la fila
-     * evaluan a "0" segun el criterio definido en la JavaDoc de la clase.
-     * Si alguna celda no se puede evaluar (formula con error, por ejemplo),
-     * devuelve {@code false} (conservador: no filtrar ante incertidumbre).
+     * Devuelve {@code true} sii TODAS las celdas de la fila (en la
+     *anchura indicada) evaluan a "0" segun el criterio definido en la
+     * JavaDoc de la clase. Si alguna celda no se puede evaluar (formula
+     * con error, por ejemplo), devuelve {@code false} (conservador: no
+     * filtrar ante incertidumbre).
      */
-    private static boolean rowHasAllZeroes(Row row, int[] colIdx, FormulaEvaluator evaluator) {
-        for (int idx : colIdx) {
+    private static boolean rowHasAllEmptyCells(Row row, int width, FormulaEvaluator evaluator) {
+        for (int idx = 0; idx < width; idx++) {
             Cell cell = row.getCell(idx);
             if (!cellIsZero(cell, evaluator)) {
                 return false;
@@ -648,10 +644,5 @@ final class EmptyRowFilter {
     static boolean cellIsZeroForTest(Cell cell) {
         return cell == null
                 || (cell.getCellType() != CellType.FORMULA && cellIsZero(cell, null));
-    }
-
-    /** Lista inmutable, estable. Expuesta para tests. */
-    static List<String> emptyRowColumnNames() {
-        return EMPTY_ROW_COLUMN_NAMES;
     }
 }

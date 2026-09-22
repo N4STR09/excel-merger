@@ -175,6 +175,13 @@ class MainTest {
         //        paquete com.excelmerger.compare con CsvParser,
         //        ResultadoReader, DiscrepancyComparator y DiscrepancyExporter.
         //        Anade dependencia Apache Commons CSV. Ver CHANGELOG [3.1.0].
-        assertThat(Main.APP_VERSION).isEqualTo("3.1.0");
+        // 3.2.0: MINOR. Correccion del error de diseno que descartaba datos:
+        //        el filtro de filas vacias ahora exige que TODAS las celdas
+        //        evaluen a vacio o 0 (antes solo 5 columnas numericas); los
+        //        huerfanos de Extraccion se detectan tambien por mismatch de
+        //        Funcion; y los triples de Deuda sin contrapartida se emiten
+        //        como filas huerfanas (mes.orphans.enabled). Sin claves de
+        //        config nuevas. Ver CHANGELOG [3.2.0].
+        assertThat(Main.APP_VERSION).isEqualTo("3.2.0");
     }
 }

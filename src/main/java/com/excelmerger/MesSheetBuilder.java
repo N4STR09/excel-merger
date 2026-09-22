@@ -67,6 +67,9 @@ public class MesSheetBuilder {
     /** Sufijo común de los mensajes "... MES omitida." */
     private static final String MSG_SUFFIX_MES_SKIPPED = "'. MES omitida.";
 
+    /** Prefijo de las claves de config por columna: {@code mes.col.N.*}. */
+    private static final String PROP_PREFIX_MES_COL = "mes.col.";
+
     /**
      * Detecta patrones tipo:
      *   VLOOKUP({col:Aplicación},Equipos!$A:$B,...)
@@ -185,9 +188,20 @@ public class MesSheetBuilder {
         }
 
         boolean orphansEnabled = config.getBoolean("mes.orphans.enabled", false);
+        DeudaRef deudaRef = null;
         if (orphansEnabled) {
-            List<RowSource> orphans = collectOrphans(workbook, source, sourceHeaderRow0);
-            rowSources.addAll(orphans);
+            // Claves de Cierre (parejas exactas + triples en minusculas)
+            // una sola vez: las consumen tanto los huerfanos de
+            // Extraccion como los de Deuda. Ver SourceKeys.
+            SourceKeys keys = loadSourceKeys(source, sourceHeaderRow0, true);
+            deudaRef = resolveDeudaRef();
+            List<RowSource> extractOrphans =
+                    collectOrphans(workbook, source, keys);
+            rowSources.addAll(extractOrphans);
+            rowSources.addAll(collectDeudaOrphans(
+                    workbook, colByName, keys, extractOrphans, deudaRef));
+            // Sort unico y estable: conserva el orden relativo de las
+            // filas de Cierre y anade las huerfanas en su sitio.
             sortRowSources(rowSources);
         }
 
@@ -206,7 +220,8 @@ public class MesSheetBuilder {
                 MesColumnStrategy col = columns.get(c);
                 Cell target = mesRow.createCell(c);
                 if (rs.isOrphan()) {
-                    writeOrphanCell(target, col, rs, workbook, colByName, mesExcelRow);
+                    writeOrphanCell(target, col, rs, workbook, colByName,
+                            mesExcelRow, deudaRef);
                 } else {
                     col.writeCell(target, rs.srcRow, source, sourceHeaderRow0,
                             workbook, rs.sourceExcelRow, colByName, mesExcelRow);
@@ -224,9 +239,12 @@ public class MesSheetBuilder {
             }
         }
 
-        // --- v2.7.1: Filtrar filas con las 5 columnas (Jira, Facturar,
-        //     PDCL, PDCL + Deuda, Horas_Mes) evaluando todas a 0. La
-        //     eliminacion es FISICA (no setZeroHeight). Se hace antes de
+        // --- Filtrar filas SIN ningun dato: solo se elimina una fila si
+        //     TODAS sus celdas evaluan a vacio o 0 (antes v2.7.1 se
+        //     miraban 5 columnas numericas, lo que descartaba filas que
+        //     aun contenian datos utiles — correccion de diseno; ver
+        //     JavaDoc de EmptyRowFilter). La eliminacion es FISICA (no
+        //     setZeroHeight). Se hace antes de
         //     aplicar los formatos condicionales para que sus rangos
         //     cubran solo las filas supervivientes y para que detectar
         //     VLOOKUP huerfanos no escanee filas inexistentes. Los
@@ -262,9 +280,10 @@ public class MesSheetBuilder {
         List<MesColumnStrategy> list = new ArrayList<>();
         int i = 1;
         while (true) {
-            String name = config.get("mes.col." + i + ".name", null);
+            String name = config.get(PROP_PREFIX_MES_COL + i + ".name", null);
             if (name == null || name.trim().isEmpty()) break;
-            String type = config.get("mes.col." + i + ".type", "EMPTY").toUpperCase(Locale.ROOT);
+            String type = config.get(PROP_PREFIX_MES_COL + i + ".type", "EMPTY")
+                    .toUpperCase(Locale.ROOT);
             list.add(MesColumnStrategyFactory.fromConfig(config, i, name.trim(), type, report));
             i++;
         }
@@ -474,67 +493,128 @@ public class MesSheetBuilder {
     }
 
     // =============================================================
-    //  Huerfanos (v1.7.0) — filas de Resultado para imputaciones del
-    //  perfil Extraccion cuya (Component Name, Matricula) no tiene fila
-    //  equivalente en Cierre.(Peticion, Recurso). Ver CHANGELOG 1.7.0.
-    //  v2.0.0: swap de nombres de perfil.
+    //  Huerfanos (v1.7.0) — filas de Resultado sin contrapartida.
+    //  Dos origenes (v2.0.0: swap de nombres de perfil):
+    //    1) Imputaciones del perfil Extraccion cuya
+    //       (Component Name, Matricula) [o cuya Funcion] no tiene fila
+    //       equivalente en Cierre.(Peticion, Recurso [Funcion]).
+    //    2) Horas de la hoja Deuda cuyo (Peticion, Matricula, Funcion)
+    //       no tiene fila equivalente (correccion de diseno: esas horas
+    //       no se representaban en ninguna fila de Resultado).
+    //  Ver CHANGELOG 1.7.0 y la correccion de perdida de datos.
     // =============================================================
 
     /**
-     * Fuente de una fila de Resultado. Dos tipos: una fila real del
+     * Fuente de una fila de Resultado. Tres tipos: una fila real del
      * perfil {@code Cierre} (con su {@code srcRow} y su numero Excel en
-     * origen), o una fila huerfana derivada de agregar imputaciones del
+     * origen), una fila huerfana derivada de agregar imputaciones del
      * perfil {@code Extraccion} para un par {@code (Component Name,
-     * Matricula)} sin contrapartida.
+     * Matricula)} sin contrapartida, o una fila huerfana derivada de un
+     * triple de {@code Deuda} sin contrapartida ({@code deudaOrphan}).
      *
-     * <p>Se usa una clase pequenya con flag {@code orphan} en lugar de
-     * una jerarquia {@code sealed} para mantener el diff minimo y evitar
-     * tocar el resto del package.</p>
+     * <p>Se usa una clase pequenya con flags en lugar de una jerarquia
+     * {@code sealed} para mantener el diff minimo y evitar tocar el
+     * resto del package.</p>
      */
     private static final class RowSource {
         final boolean orphan;
+        /** true = huerfano de Deuda (claves desde Deuda, no desde Extraccion). */
+        final boolean deudaOrphan;
         // Solo para non-orphan:
         final Row srcRow;
         final int sourceExcelRow;
         // Solo para orphan:
         final String orphanPeticion;
         final String orphanMatricula;
+        // Solo para huerfanos de Deuda: Funcion del triple de Deuda.
+        final String orphanFuncion;
         final double orphanHours;
 
-        private RowSource(boolean orphan, Row srcRow, int sourceExcelRow,
-                          String orphanPeticion, String orphanMatricula, double orphanHours) {
+        private RowSource(boolean orphan, boolean deudaOrphan, Row srcRow, int sourceExcelRow,
+                          String orphanPeticion, String orphanMatricula,
+                          String orphanFuncion, double orphanHours) {
             this.orphan = orphan;
+            this.deudaOrphan = deudaOrphan;
             this.srcRow = srcRow;
             this.sourceExcelRow = sourceExcelRow;
             this.orphanPeticion = orphanPeticion;
             this.orphanMatricula = orphanMatricula;
+            this.orphanFuncion = orphanFuncion;
             this.orphanHours = orphanHours;
         }
 
         static RowSource ofCierre(Row srcRow, int sourceExcelRow) {
-            return new RowSource(false, srcRow, sourceExcelRow, null, null, 0.0);
+            return new RowSource(false, false, srcRow, sourceExcelRow,
+                    null, null, null, 0.0);
         }
 
         static RowSource ofOrphan(String peticion, String matricula, double hours) {
-            return new RowSource(true, null, -1, peticion, matricula, hours);
+            return new RowSource(true, false, null, -1,
+                    peticion, matricula, null, hours);
+        }
+
+        static RowSource ofDeudaOrphan(String peticion, String matricula, String funcion) {
+            return new RowSource(true, true, null, -1,
+                    peticion, matricula, funcion, 0.0);
         }
 
         boolean isOrphan() { return orphan; }
     }
 
     /**
-     * Recolecta huerfanos: imputaciones de la hoja configurada en
-     * {@code mes.orphans.sourceSheet} cuya {@code (Component Name, Matricula)}
-     * no existe como {@code (Peticion, Recurso)} en la hoja {@code source}.
-     * Las imputaciones se agrupan por pareja {@code (CN, Mat)} y las horas
+     * Claves de contrapartida extraidas de la hoja origen (Cierre) para
+     * decidir que imputaciones son huerfanas. Dos niveles, alineados con
+     * la semantica del SUMIFS de Jira (case-insensitive pero NO
+     * trim-insensitive):
+     *
+     * <ul>
+     *   <li>{@code exactPairs}: pares {@code (Peticion, Recurso)} con el
+     *       caso original — el gate historico de v1.7.0.</li>
+     *   <li>{@code lowerTriples}: triples {@code (Peticion, Recurso,
+     *       Funcion)} en minusculas ({@link Locale#ROOT}) — recupera las
+     *       imputaciones cuya Funcion no tiene contrapartida, que el
+     *       SUMIFS de Excel tampoco suma.</li>
+     * </ul>
+     *
+     * <p>{@code tripleMode} indica que la hoja origen tiene columna
+     * {@code Funcion} y por tanto los triples son utilizables. Si es
+     * {@code false}, solo se aplica el gate historico por pareja (los
+     * huerfanos de Deuda se omiten: sin Funcion no hay gate seguro).</p>
+     */
+    private static final class SourceKeys {
+        final Set<String> exactPairs;
+        final Set<String> lowerTriples;
+        final boolean tripleMode;
+
+        SourceKeys(Set<String> exactPairs, Set<String> lowerTriples, boolean tripleMode) {
+            this.exactPairs = exactPairs;
+            this.lowerTriples = lowerTriples;
+            this.tripleMode = tripleMode;
+        }
+    }
+
+    /**
+     * Recolecta huerfanos de Extraccion: imputaciones de la hoja
+     * configurada en {@code mes.orphans.sourceSheet} sin contrapartida en
+     * la hoja {@code source}. Es huerfano si su pareja
+     * {@code (Component Name, Matricula)} no existe como
+     * {@code (Peticion, Recurso)} en Cierre <b>o</b> si su triple
+     * {@code (CN, Matricula, Funcion)} en minusculas no existe como
+     * {@code (Peticion, Recurso, Funcion)}. La primera mitad es
+     * exactamente el gate historico (aditivo: no puede dejar fuera ninguna
+     * fila que aquel marcara); la segunda recupera las imputaciones con
+     * Funcion sin contrapartida (p. ej. una imputacion "Sup" cuando solo
+     * hay fila "Dev"), que el SUMIFS de Jira no suma. Las imputaciones se
+     * agrupan por pareja {@code (CN, Mat)} (como hasta ahora) y las horas
      * se suman.
      *
      * <p>Si la hoja de huerfanos no existe o no tiene cabeceras
      * identificables, se emite un warning y se devuelve una lista vacia
-     * (opt-in permisivo).</p>
+     * (opt-in permisivo). Si falta la columna {@code Funcion} en la hoja
+     * de huerfanos (o en Cierre, ya detectado en
+     * {@link #loadSourceKeys}), se avisa y se degrada al gate por pareja.</p>
      */
-    private List<RowSource> collectOrphans(Workbook workbook, Sheet source,
-                                           int sourceHeaderRow0) {
+    private List<RowSource> collectOrphans(Workbook workbook, Sheet source, SourceKeys keys) {
         // v2.0.0: default ajustado a "Extraccion" (antes "Cierre") tras el
         // swap de nombres de perfil.
         String orphanSheetName = config.get("mes.orphans.sourceSheet", "Extraccion");
@@ -568,12 +648,19 @@ public class MesSheetBuilder {
             return new ArrayList<>();
         }
 
-        // Set (Peticion, Recurso) existentes en el perfil Cierre (v2.0.0;
-        // antes Extraccion), normalizados como STRING (coherente con el
-        // fix 1.6.2: asText.columns=Peticion,Recurso).
-        Set<String> extKeys = loadExtractionPairKeys(source, sourceHeaderRow0);
+        // Claves del perfil Cierre (v2.0.0; antes Extraccion): parejas
+        // exactas + triples en minusculas. Calculadas fuera (ver build).
+        // Deteccion de Funcion en la hoja de huerfanos para el gate por
+        // triple; si falta, degradacion al gate por pareja con warning.
+        int funIdx = keys.tripleMode ? PoiUtils.findColumnIndex(orphanHeader, "Funcion") : -1;
+        if (keys.tripleMode && funIdx < 0) {
+            report.addWarning(WARN_CATEGORY_CABECERA,
+                    "No se pudo localizar la columna 'Funcion' en '" + orphanSheetName
+                            + "'; los huerfanos se calculan solo por (Component Name, Matricula).");
+        }
+        boolean tripleMode = funIdx >= 0;
 
-        // Agrupar por (CN, Mat) sumando Hours.
+        // Agrupar por (CN, Mat) sumando Hours (como desde v1.7.0).
         Map<String, Double> hoursByPair = new LinkedHashMap<>();
         int orphanLastRow = orphanSheet.getLastRowNum();
         for (int r = orphanHeaderRow0 + 1; r <= orphanLastRow; r++) {
@@ -584,7 +671,9 @@ public class MesSheetBuilder {
             if (cn == null || cn.isEmpty()) continue;
             String matKey = mat == null ? "" : mat;
             String pairKey = pairKey(cn, matKey);
-            if (extKeys.contains(pairKey)) continue; // no es huerfano
+            if (!isExtractionOrphan(keys, tripleMode, funIdx, row, cn, matKey, pairKey)) {
+                continue; // no es huerfano
+            }
             double hours = cellAsDouble(row.getCell(hIdx));
             hoursByPair.merge(pairKey, hours, Double::sum);
         }
@@ -604,30 +693,47 @@ public class MesSheetBuilder {
     }
 
     /**
-     * Construye el set de claves {@code "pet|rec"} a partir de las filas
-     * del perfil {@code Cierre} (v2.0.0; antes perfil {@code Extraccion}).
-     * Coherente con la normalizacion del fix 1.6.2: las celdas numericas
-     * enteras se serializan sin decimales.
+     * Construye las {@link SourceKeys} de la hoja origen (Cierre): el par
+     * {@code (Peticion, Recurso)} en caso original (gate historico,
+     * coherente con la normalizacion del fix 1.6.2: las celdas numericas
+     * enteras se serializan sin decimales) y, si hay columna
+     * {@code Funcion}, el triple en minusculas (gate por Funcion).
+     *
+     * <p>Si faltan {@code Peticion}/{@code Recurso} se emite el warning
+     * historico y se devuelven claves vacias (todos los Component Name
+     * seran huerfanos, cosa que el usuario notara en el resultado). Si
+     * {@code needTriple} y falta {@code Funcion}, se avisa una vez y se
+     * degrada a modo parejas ({@code tripleMode=false}): se conserva asi
+     * el comportamiento v1.7.0 en lugar de multiplicar filas huerfanas.
+     * El nombre "Recurso" viene implicitamente del SUMIFS de Jira
+     * (match=Component Name:Peticion,Matricula:Recurso,Funcion:Funcion);
+     * para no introducir claves de config nuevas, "Recurso" y "Funcion"
+     * se buscan por nombre literal en la cabecera.</p>
      */
-    private Set<String> loadExtractionPairKeys(Sheet source, int sourceHeaderRow0) {
+    private SourceKeys loadSourceKeys(Sheet source, int sourceHeaderRow0, boolean needTriple) {
         Row header = source.getRow(sourceHeaderRow0);
-        if (header == null) return new LinkedHashSet<>();
+        if (header == null) {
+            return new SourceKeys(new LinkedHashSet<>(), new LinkedHashSet<>(), false);
+        }
         String peticionHeader = config.get("mes.anchorColumn", "Peticion");
-        // El nombre "Recurso" viene implicitamente del SUMIFS de Jira
-        // (match=Component Name:Peticion,Matricula:Recurso,...). Para no
-        // introducir otra clave de config, buscamos la columna "Recurso"
-        // por nombre literal en la hoja origen. Si no existe, devolvemos
-        // set vacio: todos los Component Name seran huerfanos, cosa que
-        // el usuario notara en el resultado.
         int petIdx = PoiUtils.findColumnIndex(header, peticionHeader);
         int recIdx = PoiUtils.findColumnIndex(header, "Recurso");
-        Set<String> keys = new LinkedHashSet<>();
+        Set<String> pairs = new LinkedHashSet<>();
+        Set<String> triples = new LinkedHashSet<>();
         if (petIdx < 0 || recIdx < 0) {
             report.addWarning(WARN_CATEGORY_CABECERA,
                     "No se pudieron localizar columnas 'Peticion'/'Recurso' en '"
                             + source.getSheetName() + "' para calcular huerfanos.");
-            return keys;
+            return new SourceKeys(pairs, triples, false);
         }
+        int funIdx = PoiUtils.findColumnIndex(header, "Funcion");
+        if (funIdx < 0 && needTriple) {
+            report.addWarning(WARN_CATEGORY_CABECERA,
+                    "No se pudo localizar la columna 'Funcion' en '"
+                            + source.getSheetName() + "'; los huerfanos se calculan solo "
+                            + "por (Peticion, Recurso) y se omiten los de Deuda.");
+        }
+        boolean tripleMode = funIdx >= 0;
         int last = source.getLastRowNum();
         for (int r = sourceHeaderRow0 + 1; r <= last; r++) {
             Row row = source.getRow(r);
@@ -636,9 +742,264 @@ public class MesSheetBuilder {
             if (pet == null || pet.isEmpty()) continue;
             String rec = cellAsPlainString(row.getCell(recIdx));
             if (rec == null) rec = "";
-            keys.add(pairKey(pet, rec));
+            pairs.add(pairKey(pet, rec));
+            if (tripleMode) {
+                String fun = cellAsPlainString(row.getCell(funIdx));
+                triples.add(lowerTripleKey(pet, rec, fun == null ? "" : fun));
+            }
         }
-        return keys;
+        return new SourceKeys(pairs, triples, tripleMode);
+    }
+
+    /**
+     * Decide si una imputacion de Extraccion es huerfana. Regla aditiva
+     * respecto a v1.7.0: lo es si su pareja (CN, Matricula) no existe en
+     * Cierre <b>o</b> si su triple (CN, Matricula, Funcion) en minusculas
+     * no existe en Cierre. La primera mitad es exactamente el gate
+     * historico por caso original; la segunda replica la insensibilidad de
+     * caja del SUMIFS de Jira para no perder imputaciones con Funcion sin
+     * contrapartida. Con {@code tripleMode=false} degrada al gate
+     * historico puro (comportamiento v1.7.0 identico).
+     */
+    private static boolean isExtractionOrphan(SourceKeys keys, boolean tripleMode, int funIdx,
+                                              Row row, String cn, String matKey,
+                                              String pairKey) {
+        if (!keys.exactPairs.contains(pairKey)) {
+            return true;
+        }
+        if (!tripleMode) {
+            return false;
+        }
+        String fun = cellAsPlainString(row.getCell(funIdx));
+        return !keys.lowerTriples.contains(lowerTripleKey(cn, matKey, fun == null ? "" : fun));
+    }
+
+    /**
+     * Recupera las horas de la hoja Deuda cuyo triple (Peticion,
+     * Matricula, Funcion) no tiene fila equivalente en Resultado: ni en
+     * Cierre (triples en minusculas), ni en los huerfanos de Extraccion
+     * (esa pareja con Funcion "-", que ya suma la propia fila huerfana),
+     * ni un triple de Deuda ya acumulado (una fila por triple). Sin este
+     * paso esas horas no se representaban en ninguna fila de Resultado y
+     * se perdian (correccion del diseno; ver CHANGELOG).
+     *
+     * <p>Devuelve una fila huerfana {@link RowSource#ofDeudaOrphan} por
+     * triple; ver {@link #writeOrphanCell} para como se rellena. Las
+     * columnas FORMULA se evaluan igual que en cualquier fila huerfana.</p>
+     *
+     * <p>Se omite en silencio si: no hay columna
+     * FORMULA_PLUS_SUMIFS configurada ({@code deudaRef == null}), no hay
+     * claves por Funcion ({@code tripleMode=false}) o la hoja Deuda no
+     * existe (fichero opcional ausente, o modos de output que no copian
+     * Deuda). Si la hoja existe pero sus cabeceras no cuadran, se emite
+     * warning CABECERA. Las filas de Deuda con Peticion vacia (pie de
+     * tabla) y los triples con horas totales a 0 se descartan: no hay
+     * dato que representar.</p>
+     *
+     * <p>Solo se invoca con {@code mes.orphans.enabled=true} (ver
+     * {@link #build}); sin huerfanos activos no cambia nada el
+     * comportamiento historico.</p>
+     */
+    private List<RowSource> collectDeudaOrphans(Workbook workbook,
+                                                Map<String, Integer> colByName,
+                                                SourceKeys keys,
+                                                List<RowSource> extractOrphans,
+                                                DeudaRef deudaRef) {
+        List<RowSource> out = new ArrayList<>();
+        if (deudaRef == null || keys == null || !keys.tripleMode) {
+            return out;
+        }
+        Sheet deuda = workbook.getSheet(deudaRef.sheet);
+        if (deuda == null) {
+            // Sin fichero Deuda (o sin copia de Deuda en este modo de
+            // output): mismo degradado silencioso que la propia columna.
+            return out;
+        }
+        int headerRow0 = PoiUtils.detectHeaderRow(deuda);
+        Row header = deuda.getRow(headerRow0);
+        int sumIdx = header == null ? -1 : PoiUtils.findColumnIndex(header, deudaRef.sumHeader);
+        int petIdx = -1;
+        int matIdx = -1;
+        int funIdx = -1;
+        if (header != null) {
+            for (String[] m : deudaRef.matches) {
+                int idx = PoiUtils.findColumnIndex(header, m[0]);
+                switch (m[0].toLowerCase(Locale.ROOT)) {
+                    case "peticion": petIdx = idx; break;
+                    case "matricula": matIdx = idx; break;
+                    case "funcion":  funIdx = idx; break;
+                    default: break;
+                }
+            }
+        }
+        if (header == null || sumIdx < 0 || petIdx < 0 || matIdx < 0 || funIdx < 0
+                || !colByName.containsKey(deudaRef.petLocal)
+                || !colByName.containsKey(deudaRef.matLocal)
+                || !colByName.containsKey(deudaRef.funLocal)) {
+            report.addWarning(WARN_CATEGORY_CABECERA,
+                    "No se pudieron localizar en '" + deudaRef.sheet + "' las cabeceras "
+                            + deudaRef.sumHeader + "/Peticion/Matricula/Funcion (o sus "
+                            + "columnas MES counterpartes) para calcular huerfanos de Deuda; "
+                            + "la seccion se omite.");
+            return out;
+        }
+
+        // Gate: triples de Cierre + parejas huerfano de Extraccion con
+        // Funcion "-" (esas horas ya las suma la fila huerfana existente)
+        // + triples ya acumulados (una fila por triple).
+        Set<String> gate = new LinkedHashSet<>(keys.lowerTriples);
+        for (RowSource eo : extractOrphans) {
+            gate.add(lowerTripleKey(eo.orphanPeticion, eo.orphanMatricula, "-"));
+        }
+
+        // Agregar horas por triple en minusculas (una sola fila por
+        // triple; el SUMIFS de la fila suma todas las entradas).
+        Map<String, DeudaAgg> byTriple = new LinkedHashMap<>();
+        int last = deuda.getLastRowNum();
+        for (int r = headerRow0 + 1; r <= last; r++) {
+            Row row = deuda.getRow(r);
+            if (row == null) continue;
+            String pet = cellAsPlainString(row.getCell(petIdx));
+            if (pet == null || pet.isEmpty()) continue; // pie de tabla / fila vacia
+            String mat = cellAsPlainString(row.getCell(matIdx));
+            if (mat == null) mat = "";
+            String fun = cellAsPlainString(row.getCell(funIdx));
+            if (fun == null) fun = "";
+            double hours = cellAsDouble(row.getCell(sumIdx));
+            String lower = lowerTripleKey(pet, mat, fun);
+            DeudaAgg agg = byTriple.get(lower);
+            if (agg == null) {
+                byTriple.put(lower, new DeudaAgg(pet, mat, fun, hours));
+            } else {
+                agg.hours += hours;
+            }
+        }
+
+        for (Map.Entry<String, DeudaAgg> e : byTriple.entrySet()) {
+            DeudaAgg agg = e.getValue();
+            if (agg.hours == 0.0) {
+                continue; // sin horas que representar
+            }
+            if (gate.contains(e.getKey())) {
+                continue; // ya tiene fila (Cierre, Extraccion u otro Deuda)
+            }
+            gate.add(e.getKey());
+            out.add(RowSource.ofDeudaOrphan(agg.pet, agg.mat, agg.fun));
+        }
+        if (!out.isEmpty()) {
+            log.info("Huerfanos de Deuda detectados: {} triples de '{}' sin contrapartida.",
+                    out.size(), deudaRef.sheet);
+        }
+        return out;
+    }
+
+    /**
+     * Agregado de horas de Deuda para un triple (clave en minusculas);
+     * conserva la forma original de la primera fila para escribir las
+     * celdas de clave.
+     */
+    private static final class DeudaAgg {
+        final String pet;
+        final String mat;
+        final String fun;
+        double hours;
+
+        DeudaAgg(String pet, String mat, String fun, double hours) {
+            this.pet = pet;
+            this.mat = mat;
+            this.fun = fun;
+            this.hours = hours;
+        }
+    }
+
+    /**
+     * Referencia a la columna MES {@code FORMULA_PLUS_SUMIFS} que cruza
+     * con la hoja Deuda, derivada de la propia config {@code mes.col.N.*}
+     * (sin claves de config nuevas). {@code petLocal}, {@code matLocal} y
+     * {@code funLocal} son los nombres de columna MES que escriben los
+     * valores de Deuda en una fila huerfana de Deuda.
+     */
+    private static final class DeudaRef {
+        final String sheet;
+        final String sumHeader;
+        final List<String[]> matches;
+        final String petLocal;
+        final String matLocal;
+        final String funLocal;
+
+        DeudaRef(String sheet, String sumHeader, List<String[]> matches,
+                 String petLocal, String matLocal, String funLocal) {
+            this.sheet = sheet;
+            this.sumHeader = sumHeader;
+            this.matches = matches;
+            this.petLocal = petLocal;
+            this.matLocal = matLocal;
+            this.funLocal = funLocal;
+        }
+    }
+
+    /**
+     * Deriva el {@link DeudaRef} escaneando {@code mes.col.N.*} en busca
+     * del tipo {@code FORMULA_PLUS_SUMIFS} (tipicamente "PDCL + Deuda").
+     * Devuelve {@code null} si no hay tal columna, si su config esta
+     * incompleta o si el {@code match} no cubre los tres criterios
+     * Peticion/Matricula/Funcion (en esos casos no hay gate seguro y los
+     * huerfanos de Deuda se omiten; la propia columna ya degrada o se
+     * avisa por otro via).
+     */
+    private DeudaRef resolveDeudaRef() {
+        int i = 1;
+        while (true) {
+            String name = config.get(PROP_PREFIX_MES_COL + i + ".name", null);
+            if (name == null || name.trim().isEmpty()) break;
+            String type = config.get(PROP_PREFIX_MES_COL + i + ".type", "")
+                    .trim().toUpperCase(Locale.ROOT);
+            if ("FORMULA_PLUS_SUMIFS".equals(type)) {
+                String sheet = config.get(PROP_PREFIX_MES_COL + i + ".from", null);
+                String sum = config.get(PROP_PREFIX_MES_COL + i + ".sum", null);
+                List<String[]> matches =
+                        parseMatchPairs(config.get(PROP_PREFIX_MES_COL + i + ".match", ""));
+                if (sheet == null || sum == null || matches.isEmpty()) {
+                    return null;
+                }
+                String petLocal = null;
+                String matLocal = null;
+                String funLocal = null;
+                for (String[] m : matches) {
+                    switch (m[0].toLowerCase(Locale.ROOT)) {
+                        case "peticion": petLocal = m[1]; break;
+                        case "matricula": matLocal = m[1]; break;
+                        case "funcion":  funLocal = m[1]; break;
+                        default: break;
+                    }
+                }
+                if (petLocal == null || matLocal == null || funLocal == null) {
+                    return null;
+                }
+                return new DeudaRef(sheet, sum, matches, petLocal, matLocal, funLocal);
+            }
+            i++;
+        }
+        return null;
+    }
+
+    /**
+     * Parsea una expresion
+     * {@code match=remoteHeader1:localHeader1,remoteHeader2:localHeader2}
+     * en una lista de pares. Mismo comportamiento que
+     * {@code MesColumnStrategyFactory.parseMatchExpression} (aqui es
+     * privado; se replica para no acoplar el builder a la factoria).
+     */
+    private static List<String[]> parseMatchPairs(String expr) {
+        List<String[]> out = new ArrayList<>();
+        if (expr == null || expr.trim().isEmpty()) return out;
+        for (String pair : expr.split(",")) {
+            String[] parts = pair.split(":", 2);
+            if (parts.length == 2) {
+                out.add(new String[] {parts[0].trim(), parts[1].trim()});
+            }
+        }
+        return out;
     }
 
     /**
@@ -650,15 +1011,53 @@ public class MesSheetBuilder {
      * igual al resolver {@code col:X} contra la misma fila MES), y todas las
      * demas columnas (COPY de otras cosas, EMPTY) reciben un literal
      * {@code "-"} para cumplir el contrato del usuario.
+     *
+     * <p>Rama especial para huerfanos de Deuda ({@code rs.deudaOrphan}),
+     * que se comprueba ANTES que la de Extraccion: las claves Petición /
+     * Matrícula / Funcion toman los valores del triple de Deuda (nombres
+     * de columna derivados del match de la FORMULA_PLUS_SUMIFS) para que
+     * su propio SUMIFS cruce contra la fila resultante; la columna Jira
+     * recibe {@code 0} numerico (estas horas no son imputaciones de Jira;
+     * de otro modo Facturar/PDCL evaluarian a {@code #VALUE!}) y las
+     * horas de Deuda las aporta la FORMULA_PLUS_SUMIFS via los criterios
+     * de su propia fila.</p>
      */
     private void writeOrphanCell(Cell target, MesColumnStrategy col, RowSource rs,
                                  Workbook workbook, Map<String, Integer> colByName,
-                                 int mesExcelRow) {
+                                 int mesExcelRow, DeudaRef deudaRef) {
         String colPeticion  = config.get("mes.orphans.colPeticion",  "Petición");
         String colMatricula = config.get("mes.orphans.colMatricula", "Matrícula");
         String colJira      = config.get("mes.orphans.colJira",      "Jira");
 
         String name = col.getName();
+
+        if (rs.deudaOrphan && deudaRef != null) {
+            if (name.equals(deudaRef.petLocal)) {
+                target.setCellValue(rs.orphanPeticion);
+                return;
+            }
+            if (name.equals(deudaRef.matLocal)) {
+                target.setCellValue(rs.orphanMatricula);
+                return;
+            }
+            if (name.equals(deudaRef.funLocal)) {
+                target.setCellValue(rs.orphanFuncion);
+                return;
+            }
+            if (name.equals(colJira)) {
+                target.setCellValue(0.0);
+                return;
+            }
+            if (col instanceof FormulaColumnStrategy
+                    || col instanceof FormulaPlusSumIfsColumnStrategy) {
+                col.writeCell(target, null, null, -1, workbook,
+                        -1, colByName, mesExcelRow);
+                return;
+            }
+            target.setCellValue("-");
+            return;
+        }
+
         if (name.equals(colPeticion)) {
             target.setCellValue(rs.orphanPeticion);
             return;
@@ -790,6 +1189,20 @@ public class MesSheetBuilder {
     private static String pairKey(String pet, String rec) {
         // Separador '\u0001' para evitar colisiones con valores reales.
         return pet + "\u0001" + rec;
+    }
+
+    /** Clave triple "pet|rec|fun" con el mismo separador que {@link #pairKey}. */
+    private static String tripleKey(String pet, String rec, String fun) {
+        return pet + "\u0001" + rec + "\u0001" + fun;
+    }
+
+    /**
+     * {@link #tripleKey} en minusculas ({@link Locale#ROOT}): replica la
+     * insensibilidad de caja del SUMIFS de Excel para las comparaciones
+     * de gate (sin trim: el SUMIFS tampoco es trim-insensible).
+     */
+    private static String lowerTripleKey(String pet, String rec, String fun) {
+        return tripleKey(pet, rec, fun).toLowerCase(Locale.ROOT);
     }
 
     private static String[] unpairKey(String key) {

@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests unitarios de {@link EmptyRowFilter} (v2.7.1).
+ * Tests unitarios de {@link EmptyRowFilter} (v2.7.1 + correccion de
+ * diseno: perdida de datos).
  *
  * <p>Cubren tres aspectos:</p>
  * <ul>
@@ -18,10 +19,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       NUMERIC distinto, STRING vacio, STRING "-", STRING con texto).</li>
  *   <li>Traduccion de referencias de fila locales en formulas
  *       ({@code translateLocalRowRefs}).</li>
- *   <li>Filtrado integral: dado un sheet con cabeceras y filas
- *       construidas a mano (con valores literales numericos en las 5
- *       columnas), {@code apply} elimina las filas correctas y conserva
- *       las demas.</li>
+ *   <li>Filtrado integral: solo se elimina una fila si TODAS sus celdas
+ *       (anchura = union de cabecera y fila) evaluan a vacio o 0. Una
+ *       fila con cualquier dato util (clave de texto, titulo, estado...)
+ *       se conserva SIEMPRE, aunque sus columnas numericas valgan 0 —
+ *       ese era justamente el fallo del criterio antiguo de v2.7.1, que
+ *       descartaba filas con datos.</li>
  * </ul>
  *
  * <p>No usa fixtures Excel reales: todos los workbooks se construyen
@@ -301,30 +304,34 @@ class EmptyRowFilterTest {
     }
 
     // ==================================================================
-    //  apply: filtrado integral
+    //  apply: filtrado integral (solo se elimina una fila si TODAS sus
+    //  celdas evaluan a vacio o 0; cualquier dato util la conserva)
     // ==================================================================
 
     /**
-     * Construye una hoja Resultado minimal con las 5 columnas + Petición
-     * + Matrícula. Las 5 columnas se rellenan con valores LITERALES
-     * numericos (no formulas) para que FormulaEvaluator no tenga que
-     * resolver nada en este test (verificamos solo la mecanica de
-     * filtrado y compactacion).
+     * Construye una hoja Resultado minimal con las 5 columnas historicas
+     * + Petición + Matrícula, con valores LITERALES numericos (no
+     * formulas) para que FormulaEvaluator no tenga que resolver nada
+     * (verificamos solo la mecanica de filtrado y compactacion).
      *
      * <p>Estructura:</p>
      * <pre>
      * Petición | Matrícula | Jira | Facturar | PDCL | PDCL + Deuda | Horas_Mes
      * P-001    | M-1001    |  5.0 |  6.0     |  6.0 |  7.0         |  8.0
-     * P-002    | M-1002    |  0.0 |  0.0     |  0.0 |  0.0         |  0.0    &lt;-- se filtra
+     * P-002    | M-1002    |  0.0 |  0.0     |  0.0 |  0.0         |  0.0
      * P-003    | M-1003    |  3.0 |  3.6     |  3.6 |  3.6         |  4.0
-     * P-004    | M-1004    |  0.0 |  0.0     |  0.0 |  0.0         |  0.0    &lt;-- se filtra
+     * P-004    | M-1004    |  0.0 |  0.0     |  0.0 |  0.0         |  0.0
      * P-005    | M-1005    |  1.0 |  1.2     |  1.2 |  1.2         |  0.0
      * </pre>
+     *
+     * <p>TODAS las filas llevan claves de texto: ninguna es eliminable
+     * bajo el criterio actual (las filas 2 y 4 solo lo eran bajo el
+     * criterio antiguo de v2.7.1, que ignoraba el resto de columnas).</p>
      */
     private static Workbook buildSheetWithLiteralValues() {
         Workbook wb = new XSSFWorkbook();
         Sheet s = wb.createSheet("Resultado");
-        // Cabeceras (orden y nombres exactos que busca EmptyRowFilter)
+        // Cabeceras (el filtro actual no depende de nombres concretos)
         Row h = s.createRow(0);
         h.createCell(0).setCellValue("Petición");
         h.createCell(1).setCellValue("Matrícula");
@@ -356,81 +363,149 @@ class EmptyRowFilterTest {
         r.createCell(6).setCellValue(horasMes);
     }
 
+    /**
+     * Regresion de la correccion de diseno: una fila con claves de texto
+     * (peticion, matricula) NO se elimina aunque TODAS sus columnas
+     * numericas evaluen a 0. El criterio antiguo de v2.7.1 la habria
+     * borrado, descartando el dato de la propia fila.
+     */
     @Test
-    void applyFiltraFilasConTodasLasCincoColumnasACero() {
+    void applyConservaFilasConClaveTextoYColumnasNumericasACero() {
         try (Workbook wb = buildSheetWithLiteralValues()) {
             Sheet s = wb.getSheet("Resultado");
             RunReport report = new RunReport();
 
             int removed = EmptyRowFilter.apply(wb, s, 5, report);
 
-            assertThat(removed).isEqualTo(2);
-            // Tras filtrar, deben quedar 3 filas de datos (P-001, P-003, P-005)
-            // Numero total de filas (incluyendo cabecera) = 4. lastRowNum = 3.
-            assertThat(s.getLastRowNum()).isEqualTo(3);
-            // Verificar contenido en orden
-            assertThat(s.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
-            assertThat(s.getRow(2).getCell(0).getStringCellValue()).isEqualTo("P-003");
-            assertThat(s.getRow(3).getCell(0).getStringCellValue()).isEqualTo("P-005");
-        } catch (java.io.IOException e) {
-            throw new AssertionError(e);
-        }
-    }
-
-    @Test
-    void applySinFilasACeroNoElimina() {
-        try (Workbook wb = new XSSFWorkbook()) {
-            Sheet s = wb.createSheet("Resultado");
-            Row h = s.createRow(0);
-            h.createCell(0).setCellValue("Petición");
-            h.createCell(1).setCellValue("Matrícula");
-            h.createCell(2).setCellValue("Jira");
-            h.createCell(3).setCellValue("Facturar");
-            h.createCell(4).setCellValue("PDCL");
-            h.createCell(5).setCellValue("PDCL + Deuda");
-            h.createCell(6).setCellValue("Horas_Mes");
-            addDataRow(s, 1, "P-001", "M-1001", 5.0, 6.0, 6.0, 7.0, 8.0);
-            addDataRow(s, 2, "P-002", "M-1002", 0.0, 0.0, 0.0, 0.0, 1.0); // Horas_Mes salva
-            addDataRow(s, 3, "P-003", "M-1003", 0.0, 0.0, 0.0, 0.0, 0.0); // todas a 0
-
-            RunReport report = new RunReport();
-            int removed = EmptyRowFilter.apply(wb, s, 3, report);
-            assertThat(removed).isEqualTo(1);
-            // P-002 sobrevive porque Horas_Mes=1.0
+            assertThat(removed)
+                    .as("Ninguna fila con dato de texto debe eliminarse")
+                    .isZero();
+            assertThat(s.getLastRowNum()).isEqualTo(5);
+            // Las dos filas con las 5 columnas numericas a 0 siguen ahi,
+            // en su posicion original.
             assertThat(s.getRow(2).getCell(0).getStringCellValue()).isEqualTo("P-002");
+            assertThat(s.getRow(4).getCell(0).getStringCellValue()).isEqualTo("P-004");
         } catch (java.io.IOException e) {
             throw new AssertionError(e);
         }
     }
 
+    /**
+     * Criterio actual: una fila se elimina solo si TODAS sus celdas
+     * (anchura de la fila) evaluan a vacio o 0 — celdas sin crear,
+     * BLANK, numericos a 0 y strings vacios, "-", "0.00", "0,00".
+     */
     @Test
-    void applyConColumnasFaltantesEmiteWarningYNoFiltra() {
-        // Si falta alguna de las 5 columnas, el filtro debe abortar (no filtrar)
-        // y registrar un warning CONFIG en el report.
+    void applyEliminaFilasCuyoContenidoTotalEsVacioOCero() {
         try (Workbook wb = new XSSFWorkbook()) {
             Sheet s = wb.createSheet("Resultado");
             Row h = s.createRow(0);
             h.createCell(0).setCellValue("Petición");
-            // OJO: aqui falta "PDCL + Deuda", "Horas_Mes" y "Facturar"
-            h.createCell(1).setCellValue("Jira");
-            h.createCell(2).setCellValue("PDCL");
-            Row r1 = s.createRow(1);
-            r1.createCell(0).setCellValue("P-001");
-            r1.createCell(1).setCellValue(0.0);
-            r1.createCell(2).setCellValue(0.0);
+            h.createCell(1).setCellValue("Estado");
+            h.createCell(2).setCellValue("Horas_Mes");
+
+            // Fila 1: celdas nunca creadas (null -> se consideran vacias).
+            s.createRow(1);
+
+            // Fila 2: celdas BLANK explicitas.
+            Row r2 = s.createRow(2);
+            r2.createCell(0);
+            r2.createCell(1);
+            r2.createCell(2);
+
+            // Fila 3: numericos a 0.
+            Row r3 = s.createRow(3);
+            r3.createCell(0).setCellValue(0.0);
+            r3.createCell(1).setCellValue(0.0);
+            r3.createCell(2).setCellValue(0.0);
+
+            // Fila 4: strings que evaluan a cero ("-"/vacio/"0,00").
+            Row r4 = s.createRow(4);
+            r4.createCell(0).setCellValue("-");
+            r4.createCell(1).setCellValue("");
+            r4.createCell(2).setCellValue("0,00");
+
+            // Fila 5: cualquier dato util salva la fila entera.
+            Row r5 = s.createRow(5);
+            r5.createCell(0).setCellValue("P-001");
+            r5.createCell(1).setCellValue("Abierta");
+            r5.createCell(2).setCellValue(0.0);
 
             RunReport report = new RunReport();
-            int removed = EmptyRowFilter.apply(wb, s, 1, report);
+            int removed = EmptyRowFilter.apply(wb, s, 5, report);
 
-            assertThat(removed).isZero();
-            // El warning debe mencionar las columnas faltantes
-            assertThat(report.warnings()).anyMatch(w ->
-                    "CONFIG".equals(w.category)
-                    && w.message.contains("Facturar")
-                    && w.message.contains("PDCL + Deuda")
-                    && w.message.contains("Horas_Mes"));
-            // La fila P-001 sigue ahi
+            assertThat(removed).isEqualTo(4);
+            assertThat(s.getLastRowNum()).isEqualTo(1);
             assertThat(s.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
+        } catch (java.io.IOException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    /**
+     * Anchura de evaluacion = union(cabecera, fila): una celda con dato
+     * que sobresale de la cabecera NO puede ignorarse. La fila 1 tiene la
+     * celda 2 (mas alla de la cabecera de 2 columnas) con texto -> se
+     * conserva; la fila 2 esta completamente vacia -> se elimina.
+     */
+    @Test
+    void applyConsideraCeldasMasAllaDeLaCabecera() {
+        try (Workbook wb = new XSSFWorkbook()) {
+            Sheet s = wb.createSheet("Resultado");
+            Row h = s.createRow(0);
+            h.createCell(0).setCellValue("ColA");
+            h.createCell(1).setCellValue("ColB");
+            // OJO: la cabecera solo tiene 2 columnas.
+
+            Row r1 = s.createRow(1);
+            r1.createCell(0);
+            r1.createCell(1);
+            r1.createCell(2).setCellValue("dato-sobresaliente"); // fuera de cabecera
+
+            Row r2 = s.createRow(2);
+            r2.createCell(0);
+            r2.createCell(1);
+            r2.createCell(2);
+
+            RunReport report = new RunReport();
+            int removed = EmptyRowFilter.apply(wb, s, 2, report);
+
+            assertThat(removed).isEqualTo(1);
+            assertThat(s.getLastRowNum()).isEqualTo(1);
+            assertThat(s.getRow(1).getCell(2).getStringCellValue())
+                    .isEqualTo("dato-sobresaliente");
+        } catch (java.io.IOException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    /**
+     * El filtro no depende de ningun nombre de cabecera concreto (la
+     * antigua lista de 5 columnas desaparecio con la correccion de
+     * diseno): con cabeceras arbitrarias filtra igual y no emite
+     * warnings de columnas faltantes.
+     */
+    @Test
+    void applyConCabecerasArbitrariasFiltraSinWarnings() {
+        try (Workbook wb = new XSSFWorkbook()) {
+            Sheet s = wb.createSheet("Resultado");
+            Row h = s.createRow(0);
+            h.createCell(0).setCellValue("Cualquier_Cabecera_A");
+            h.createCell(1).setCellValue("Otra_Cabecera_B");
+
+            Row r1 = s.createRow(1); // completamente vacia -> fuera
+            Row r2 = s.createRow(2);
+            r2.createCell(0).setCellValue("valor-util");
+            r2.createCell(1).setCellValue(0.0);
+
+            RunReport report = new RunReport();
+            int removed = EmptyRowFilter.apply(wb, s, 2, report);
+
+            assertThat(removed).isEqualTo(1);
+            assertThat(s.getRow(1).getCell(0).getStringCellValue()).isEqualTo("valor-util");
+            assertThat(report.warnings())
+                    .as("El filtro ya no valida nombres de columna: sin warnings")
+                    .isEmpty();
         } catch (java.io.IOException e) {
             throw new AssertionError(e);
         }
@@ -442,12 +517,6 @@ class EmptyRowFilterTest {
             Sheet s = wb.createSheet("Resultado");
             Row h = s.createRow(0);
             h.createCell(0).setCellValue("Petición");
-            h.createCell(1).setCellValue("Matrícula");
-            h.createCell(2).setCellValue("Jira");
-            h.createCell(3).setCellValue("Facturar");
-            h.createCell(4).setCellValue("PDCL");
-            h.createCell(5).setCellValue("PDCL + Deuda");
-            h.createCell(6).setCellValue("Horas_Mes");
 
             RunReport report = new RunReport();
             int removed = EmptyRowFilter.apply(wb, s, 0, report);
@@ -457,10 +526,14 @@ class EmptyRowFilterTest {
         }
     }
 
+    /**
+     * Con celdas FORMULA se evaluan con FormulaEvaluator: una formula que
+     * evalua a algo distinto de 0 salva la fila aunque todo lo demas sea
+     * vacio, y una fila cuyas formulas evaluan a 0 (y sin ningun otro
+     * dato) se elimina.
+     */
     @Test
     void applyEvaluaFormulasYFiltraSegunResultado() {
-        // Verifica que con celdas FORMULA, FormulaEvaluator se invoca
-        // y las filas se filtran segun el VALOR evaluado.
         try (Workbook wb = new XSSFWorkbook()) {
             Sheet s = wb.createSheet("Resultado");
             Row h = s.createRow(0);
@@ -472,42 +545,46 @@ class EmptyRowFilterTest {
             h.createCell(5).setCellValue("PDCL + Deuda");
             h.createCell(6).setCellValue("Horas_Mes");
 
-            // Fila 1: Jira=0 (numerico), pero Facturar = 0+1 (formula evaluada -> 1)
-            // -> NO se filtra
+            // Fila 1: todo vacio salvo Facturar = 0+1 (formula -> 1) -> NO se filtra.
             Row r1 = s.createRow(1);
-            r1.createCell(0).setCellValue("P-001");
-            r1.createCell(1).setCellValue("M-1001");
+            r1.createCell(0);
+            r1.createCell(1);
             r1.createCell(2).setCellValue(0.0);
             r1.createCell(3).setCellFormula("0+1");
             r1.createCell(4).setCellValue(0.0);
             r1.createCell(5).setCellValue(0.0);
             r1.createCell(6).setCellValue(0.0);
 
-            // Fila 2: todas 0 incluidas las formulas -> se filtra
+            // Fila 2: todo vacio o 0, incluidas las formulas -> se filtra.
             Row r2 = s.createRow(2);
-            r2.createCell(0).setCellValue("P-002");
-            r2.createCell(1).setCellValue("M-1002");
+            r2.createCell(0);
+            r2.createCell(1);
             r2.createCell(2).setCellValue(0.0);
             r2.createCell(3).setCellFormula("0+0");
-            r2.createCell(4).setCellFormula("C3*1.2"); // referencia local: row 3 (excel) = Jira fila 2
+            r2.createCell(4).setCellFormula("C3*1.2"); // ref local: fila Excel 3 = esta misma fila
             r2.createCell(5).setCellValue(0.0);
             r2.createCell(6).setCellValue(0.0);
 
             RunReport report = new RunReport();
             int removed = EmptyRowFilter.apply(wb, s, 2, report);
             assertThat(removed).isEqualTo(1);
-            assertThat(s.getRow(1).getCell(0).getStringCellValue()).isEqualTo("P-001");
             assertThat(s.getLastRowNum()).isEqualTo(1);
+            // La superviviente (formula 0+1) queda en la fila 1.
+            org.apache.poi.ss.usermodel.FormulaEvaluator ev =
+                    wb.getCreationHelper().createFormulaEvaluator();
+            assertThat(ev.evaluate(s.getRow(1).getCell(3)).getNumberValue()).isEqualTo(1.0);
         } catch (java.io.IOException e) {
             throw new AssertionError(e);
         }
     }
 
+    /**
+     * Si una fila SUPERVIVIENTE estaba en Excel-row 4 y al filtrar pasa
+     * a Excel-row 2, sus formulas con referencia local C4 deben pasar a
+     * C2 para que sigan referenciando su propia fila.
+     */
     @Test
     void applyTraduceFormulasLocalesAlCompactar() {
-        // Si una fila SUPERVIVIENTE estaba en Excel-row 4 y al filtrar
-        // pasa a Excel-row 2, sus formulas con referencia local J4 deben
-        // pasar a J2 para que sigan referenciando la misma fila relativa.
         try (Workbook wb = new XSSFWorkbook()) {
             Sheet s = wb.createSheet("Resultado");
             Row h = s.createRow(0);
@@ -519,32 +596,24 @@ class EmptyRowFilterTest {
             h.createCell(5).setCellValue("PDCL + Deuda");
             h.createCell(6).setCellValue("Horas_Mes");
 
-            // Fila 1 (excel-row 2): todo 0 -> se filtra
-            Row r1 = s.createRow(1);
-            r1.createCell(0).setCellValue("P-001");
-            r1.createCell(1).setCellValue("M-1001");
-            r1.createCell(2).setCellValue(0.0);
-            r1.createCell(3).setCellValue(0.0);
-            r1.createCell(4).setCellValue(0.0);
-            r1.createCell(5).setCellValue(0.0);
-            r1.createCell(6).setCellValue(0.0);
+            // Fila 1 (excel-row 2): completamente vacia -> se filtra.
+            s.createRow(1);
 
-            // Fila 2 (excel-row 3): todo 0 -> se filtra
+            // Fila 2 (excel-row 3): vacia + numericos a 0 -> se filtra.
             Row r2 = s.createRow(2);
-            r2.createCell(0).setCellValue("P-002");
-            r2.createCell(1).setCellValue("M-1002");
+            r2.createCell(0);
+            r2.createCell(1);
             r2.createCell(2).setCellValue(0.0);
             r2.createCell(3).setCellValue(0.0);
             r2.createCell(4).setCellValue(0.0);
             r2.createCell(5).setCellValue(0.0);
             r2.createCell(6).setCellValue(0.0);
 
-            // Fila 3 (excel-row 4): formula con ref local C4 (=Jira fila 3),
-            // valor de Jira=5 -> Facturar=C4*1.2 -> 6.0. Tras filtrado, esta
-            // fila debe pasar a excel-row 2 y la formula a "C2*1.2".
+            // Fila 3 (excel-row 4): Jira=5 la salva; Facturar=C4*1.2 debe
+            // reescribirse a C2*1.2 tras compactar (excel-row 4 -> 2).
             Row r3 = s.createRow(3);
-            r3.createCell(0).setCellValue("P-003");
-            r3.createCell(1).setCellValue("M-1003");
+            r3.createCell(0);
+            r3.createCell(1);
             r3.createCell(2).setCellValue(5.0);
             r3.createCell(3).setCellFormula("C4*1.2");
             r3.createCell(4).setCellValue(6.0);
@@ -555,14 +624,14 @@ class EmptyRowFilterTest {
             int removed = EmptyRowFilter.apply(wb, s, 3, report);
             assertThat(removed).isEqualTo(2);
 
-            // P-003 ahora esta en excel-row 2 (rowIdx0=1)
+            // Superviviente ahora en excel-row 2 (rowIdx0=1).
             Row survivor = s.getRow(1);
-            assertThat(survivor.getCell(0).getStringCellValue()).isEqualTo("P-003");
-            // La formula traducida debe ser C2*1.2
+            assertThat(survivor.getCell(2).getNumericCellValue()).isEqualTo(5.0);
             assertThat(survivor.getCell(3).getCellFormula()).isEqualTo("C2*1.2");
 
-            // Y la formula evaluada debe seguir dando 6.0 (5.0 * 1.2)
-            org.apache.poi.ss.usermodel.FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
+            // Y la formula evaluada sigue dando 6.0 (5.0 * 1.2).
+            org.apache.poi.ss.usermodel.FormulaEvaluator ev =
+                    wb.getCreationHelper().createFormulaEvaluator();
             org.apache.poi.ss.usermodel.CellValue cv = ev.evaluate(survivor.getCell(3));
             assertThat(cv.getNumberValue()).isEqualTo(6.0);
         } catch (java.io.IOException e) {
@@ -570,18 +639,24 @@ class EmptyRowFilterTest {
         }
     }
 
+    /**
+     * Cuando TODAS las filas de datos estan vacias o a 0 (sin ningun
+     * dato util) se eliminan todas y solo queda la cabecera.
+     */
     @Test
-    void applyConTodasLasFilasACeroEliminaTodas() {
+    void applyConTodasLasFilasVaciasOTodasACeroEliminaTodas() {
         try (Workbook wb = buildSheetWithLiteralValues()) {
             Sheet s = wb.getSheet("Resultado");
-            // Sobrescribir todas las filas de datos con ceros
+            // Volver "sin datos" las 5 filas: claves y numericos a vacio/0.
             for (int r = 1; r <= 5; r++) {
                 Row row = s.getRow(r);
+                row.getCell(0).setBlank();
+                row.getCell(1).setBlank();
                 row.getCell(2).setCellValue(0.0);
                 row.getCell(3).setCellValue(0.0);
                 row.getCell(4).setCellValue(0.0);
                 row.getCell(5).setCellValue(0.0);
-                row.getCell(6).setCellValue(0.0);
+                row.getCell(6).setCellValue("0.00");
             }
             RunReport report = new RunReport();
             int removed = EmptyRowFilter.apply(wb, s, 5, report);

@@ -1,6 +1,6 @@
 @echo off
 REM ==========================================================
-REM  Excel Merger v3.1.0 - lanzador
+REM  Excel Merger v3.2.0 - lanzador
 REM ==========================================================
 REM  Doble clic para ejecutar el JAR. Al arrancar, aparece un
 REM  menu interactivo con tres opciones:

@@ -342,11 +342,14 @@ class ExcelMergerIntegrationTest {
 
     // ==================================================================
     //  Huerfanos (v1.7.0): filas de Resultado para imputaciones del
-    //  perfil Extraccion sin contrapartida (Peticion, Recurso) en el
-    //  perfil Cierre. v2.0.0: swap de nombres de perfil.
+    //  perfil Extraccion sin contrapartida en el perfil Cierre.
+    //  v2.0.0: swap de nombres de perfil. Correccion de diseno: ademas
+    //  de la pareja (CN, Matricula), ahora tambien se considera la
+    //  Funcion del triple, y se recuperan las horas de Deuda sin fila
+    //  equivalente. Ver CHANGELOG.
     // ==================================================================
     //
-    // Los fixtures incluyen desde v1.7.0 cuatro imputaciones huerfanas:
+    // Los fixtures incluyen desde v1.7.0 tres imputaciones huerfanas:
     //   (TICKETS, -)              2 imputaciones x 4h = 8h
     //   (VACACIONES, 90014)       1 imputacion de 3h    (90014 existe en
     //                                                    Extraccion, pero
@@ -354,6 +357,10 @@ class ExcelMergerIntegrationTest {
     //   (P-001, MAT-HUERFANO)     1 imputacion de 1h    (P-001 existe, pero
     //                                                    con M-1001 no con
     //                                                    MAT-HUERFANO)
+    // Y desde la correccion de diseno dos mas por Funcion sin
+    // contrapartida (la pareja SI existe en Cierre, pero solo con
+    // Funcion=Dev, y la imputacion es Sup): (P-001, M-1001) 4h y
+    // (138074, 99641) 4h.
     //
     // Con mes.orphans.enabled=false (default del test-config) ninguna de
     // estas imputaciones aparece en Resultado. Con enabled=true aparecen
@@ -385,8 +392,11 @@ class ExcelMergerIntegrationTest {
 
             Sheet mes = wb.getSheet("Resultado");
             // Antes: 1 cabecera + 14 texto + 3 regresion + 1 v1.8.0 + 1 v1.8.1 = 20 filas.
-            // Ahora: + 3 huerfanos (TICKETS/-, VACACIONES/90014, P-001/MAT-HUERFANO) = 23.
-            assertThat(mes.getLastRowNum() + 1).isEqualTo(23);
+            // Ahora: + 3 huerfanos por pareja sin contrapartida (TICKETS/-,
+            // VACACIONES/90014, P-001/MAT-HUERFANO) + 2 huerfanos por Funcion
+            // sin contrapartida (correccion de diseno; ver
+            // orphansEnabledAnadeHuerfanosParaFuncionSinContrapartida) = 25.
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(25);
 
             // Construir mapa (Peticion, Matricula) -> fila para buscar los huerfanos.
             java.util.Map<String, Integer> rowByPair = new java.util.LinkedHashMap<>();
@@ -543,6 +553,150 @@ class ExcelMergerIntegrationTest {
                 return;
             }
             throw new AssertionError("No se encontro fila VACACIONES en Resultado");
+        }
+    }
+
+    /**
+     * Correccion de diseno (fuga de datos 2): una imputacion de
+     * Extraccion cuya Funcion no tiene contrapartida en Cierre se
+     * perdia por dos vias a la vez: el SUMIFS de Jira no la sumaba
+     * (criterio {@code Funcion:Funcion}) y el gate de huerfanos por
+     * pareja tampoco la consideraba huerfana (la pareja SI existia en
+     * Cierre, con otra Funcion). Con huerfanos activos ahora genera fila
+     * propia: Funcion="-", Jira=horas imputadas.
+     *
+     * <p>Fixture: la fila "Sup" de (P-001, M-1001) y la "Sup" de
+     * (138074, 99641), 4h cada una; en Cierre solo hay filas "Dev" para
+     * esas parejas.</p>
+     */
+    @Test
+    void orphansEnabledAnadeHuerfanosParaFuncionSinContrapartida(@TempDir Path tmp) throws IOException {
+        ConfigLoader cfg = buildConfigWithOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            // 20 base + 3 huerfanos por pareja + 2 por Funcion = 25.
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(25);
+
+            int rP001 = findRowByKeys(mes, "P-001", "M-1001", "-");
+            assertThat(rP001)
+                    .as("Debe existir fila huerfana (P-001, M-1001, Funcion='-')")
+                    .isPositive();
+            assertThat(mes.getRow(rP001).getCell(3).getNumericCellValue())
+                    .as("Jira de la imputacion Sup de (P-001, M-1001)")
+                    .isEqualTo(4.0);
+
+            int r138 = findRowByKeys(mes, "138074", "99641", "-");
+            assertThat(r138)
+                    .as("Debe existir fila huerfana (138074, 99641, Funcion='-')")
+                    .isPositive();
+            assertThat(mes.getRow(r138).getCell(3).getNumericCellValue())
+                    .as("Jira de la imputacion Sup de (138074, 99641)")
+                    .isEqualTo(4.0);
+
+            // Las filas de Cierre con Funcion=Dev para esas mismas parejas
+            // siguen intactas (el dato nuevo es aditivo).
+            int rP001Dev = findRowByKeys(mes, "P-001", "M-1001", "Dev");
+            assertThat(rP001Dev).isPositive();
+            assertThat(mes.getRow(rP001Dev).getCell(3).getNumericCellValue())
+                    .as("Jira SUMIFS de la fila normal (P-001, M-1001, Dev): 3h + 2h")
+                    .isEqualTo(5.0);
+        }
+    }
+
+    /**
+     * Config con los TRES ficheros (incluido Deuda) y huerfanos activos.
+     */
+    private static ConfigLoader buildConfigWithDeudaAndOrphansEnabled(Path tmp)
+            throws IOException {
+        Path inputDir = tmp.resolve("input");
+        Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
+        Files.createDirectories(outputFile.getParent());
+        TestFixtures.copyFixturesWithDeudaTo(inputDir);
+        Path cfgFile = TestFixtures.renderTestConfig(
+                tmp.resolve("test-config.properties"), inputDir, outputFile);
+        String content = Files.readString(cfgFile);
+        content = content.replace("mes.orphans.enabled=false",
+                "mes.orphans.enabled=true");
+        Files.writeString(cfgFile, content);
+        return new ConfigLoader(cfgFile.toString());
+    }
+
+    /**
+     * Correccion de diseno (fuga de datos 3): las horas de Deuda cuyo
+     * triple (Peticion, Matricula, Funcion) no tenia fila equivalente en
+     * Resultado no se representaban en NINGUNA columna (el SUMIFS de
+     * PDCL + Deuda solo cruza contra filas existentes) y se perdian.
+     * Con huerfanos activos esas horas generan fila propia: claves desde
+     * Deuda, Jira=0 y la columna PDCL + Deuda suma las horas via los
+     * criterios de su propia fila.
+     *
+     * <p>Fixture deuda.xlsx: (P-999, M-9999, Dev) 100h y (P-010, "-",
+     * Dev) 4h no tienen contrapartida. El resto de triples si la tienen
+     * y sus horas siguen sumandolas la fila correspondiente (sin cambios:
+     * los tests v2.2.0 cubren ese camino con huerfanos desactivados).</p>
+     */
+    @Test
+    void orphansEnabledConDeudaRecuperaHorasDeTriplesSinContrapartida(@TempDir Path tmp)
+            throws IOException {
+        ConfigLoader cfg = buildConfigWithDeudaAndOrphansEnabled(tmp);
+        new ExcelMerger(cfg, new RunReport()).merge();
+
+        try (FileInputStream fis = new FileInputStream(
+                tmp.resolve("output").resolve("resultado.xlsx").toFile());
+             Workbook wb = WorkbookFactory.create(fis)) {
+
+            Sheet mes = wb.getSheet("Resultado");
+            FormulaEvaluator ev = wb.getCreationHelper().createFormulaEvaluator();
+
+            // 20 base + 3 huerfanos de Extraccion + 2 por Funcion
+            // + 2 huerfanos de Deuda = 27.
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(27);
+
+            // Triple de Deuda huerfano (P-999, M-9999, Dev): 100h.
+            int r999 = findRowByKeys(mes, "P-999", "M-9999", "Dev");
+            assertThat(r999).as("Fila huerfana de Deuda P-999").isPositive();
+            assertThat(mes.getRow(r999).getCell(3).getNumericCellValue())
+                    .as("Jira de una fila de Deuda debe ser 0 (no son horas de Jira)")
+                    .isZero();
+            assertThat(ev.evaluate(mes.getRow(r999).getCell(8)).getNumberValue())
+                    .as("PDCL = Jira*1.2 = 0")
+                    .isZero();
+            assertThat(ev.evaluate(mes.getRow(r999).getCell(4)).getNumberValue())
+                    .as("Facturar = Jira*1.2 = 0 (sin #VALUE!)")
+                    .isZero();
+            assertThat(ev.evaluate(mes.getRow(r999).getCell(9)).getNumberValue())
+                    .as("PDCL + Deuda debe sumar las 100h de Deuda")
+                    .isEqualTo(100.0);
+
+            // Triple de Deuda huerfano (P-010, "-", Dev): 4h. OJO: hay
+            // OTRA fila P-010 (la de Cierre, Matricula=M-1006) a la que
+            // estas 4h no deben sumarse.
+            int r010 = findRowByKeys(mes, "P-010", "-", "Dev");
+            assertThat(r010).as("Fila huerfana de Deuda P-010/-").isPositive();
+            assertThat(mes.getRow(r010).getCell(3).getNumericCellValue()).isZero();
+            assertThat(ev.evaluate(mes.getRow(r010).getCell(9)).getNumberValue())
+                    .as("PDCL + Deuda debe sumar las 4h de Deuda")
+                    .isEqualTo(4.0);
+
+            int r010Cierre = findRowByKeys(mes, "P-010", "M-1006", "Dev");
+            assertThat(r010Cierre).isPositive();
+            double pdclCierre = ev.evaluate(mes.getRow(r010Cierre).getCell(8)).getNumberValue();
+            double pdclPlusCierre =
+                    ev.evaluate(mes.getRow(r010Cierre).getCell(9)).getNumberValue();
+            assertThat(pdclPlusCierre - pdclCierre)
+                    .as("La fila de Cierre de P-010 no debe sumar la deuda de Matricula '-'")
+                    .isZero();
+
+            // Los triples de Deuda con contrapartida no crean fila extra:
+            // P-999 era el unico par sin contrapartida entre esas dos... ademas
+            // del placeholder '-'. No debe haber mas filas P-002 con matricula
+            // de Deuda que la de Cierre.
+            assertThat(findRowByKeys(mes, "P-002", "M-1002", "Dev")).isPositive();
         }
     }
 
@@ -1743,6 +1897,35 @@ class ExcelMergerIntegrationTest {
         return -1;
     }
 
+    /**
+     * Busca la primera fila de Resultado cuyas columnas Petición (0),
+     * Matrícula (5) y Funcion (6) del test-config coinciden exactamente.
+     * Necesario desde que puede haber varias filas para la misma
+     * Petición (fila de Cierre + huerfanos con otras Matricula/Funcion).
+     * Devuelve -1 si no se encuentra.
+     */
+    private static int findRowByKeys(Sheet sheet, String peticion,
+                                     String matricula, String funcion) {
+        int last = sheet.getLastRowNum();
+        for (int r = 1; r <= last; r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) continue;
+            Cell a = row.getCell(0);
+            Cell m = row.getCell(5);
+            Cell f = row.getCell(6);
+            if (a == null || m == null || f == null) continue;
+            if (a.getCellType() != CellType.STRING
+                    || m.getCellType() != CellType.STRING
+                    || f.getCellType() != CellType.STRING) continue;
+            if (peticion.equals(a.getStringCellValue())
+                    && matricula.equals(m.getStringCellValue())
+                    && funcion.equals(f.getStringCellValue())) {
+                return r;
+            }
+        }
+        return -1;
+    }
+
     // ==================================================================
     //  v2.3.0 — Output mode (cierre / responsables / completo)
     // ==================================================================
@@ -2646,20 +2829,30 @@ class ExcelMergerIntegrationTest {
     }
 
     // ==================================================================
-    //  v2.7.1 — Filtrado de filas con las 5 columnas a 0
+    //  v2.7.1 — Filtrado de filas sin datos (criterio actual: TODAS las
+    //  celdas vacias o 0; correccion de diseno: una fila con datos
+    //  utiles NUNCA se elimina, aunque sus columnas numericas valgan 0)
     // ==================================================================
 
     /**
-     * v2.7.1: helper que copia los fixtures al tmp, abre {@code cierre.xlsx},
-     * anade una fila P-099 con {@code UltimaPrevision_Horas_Mes=0} y todos los
-     * demas valores que llevarian a Jira/Facturar/PDCL/PDCL+Deuda/Horas_Mes a 0,
-     * y devuelve la ruta del fichero modificado. La fila P-099 NO tiene
-     * imputaciones en {@code extraccion.xlsx} ni en {@code deuda.xlsx} (que
-     * tampoco se anade), de modo que sus 5 columnas son 0 y queda candidata a
-     * ser filtrada.
+     * v2.7.1 + correccion de diseno: helper que copia los fixtures al
+     * tmp, abre {@code cierre.xlsx} y anade dos filas:
      *
-     * <p>Tambien anade una segunda fila P-100 que <i>tiene</i> Horas_Mes=2.0
-     * pero ningun otro valor: esa fila NO debe filtrarse (Horas_Mes>0).</p>
+     * <ul>
+     *   <li><b>P-099</b>: todas las columnas numericas que repercuten en
+     *       Resultado valen 0 (sin imputaciones en {@code extraccion.xlsx}
+     *       ni deuda, {@code UltimaPrevision_Horas_Mes="0.00"}), PERO
+     *       conserva datos utiles (titulo, aplicacion, estado,
+     *       responsable, matricula...). El criterio antiguo de v2.7.1 la
+     *       habria eliminado descartando esos datos: es exactamente la
+     *       perdida de datos que corrige el filtro actual.</li>
+     *   <li><b>P-100</b>: solo tiene Horas_Mes=2.0; tampoco debe
+     *       filtrarse (tampoco lo era antes).</li>
+     * </ul>
+     *
+     * <p>Ninguna de las dos filas tiene imputaciones en
+     * {@code extraccion.xlsx} ni en {@code deuda.xlsx} (que tampoco se
+     * anade).</p>
      *
      * <p>Estructura del fichero {@code cierre.xlsx} segun
      * {@code gen_fixtures.py}: cabeceras en fila 1, columnas:
@@ -2683,14 +2876,16 @@ class ExcelMergerIntegrationTest {
             Sheet s = wb.getSheet("Cierre");
             int next = s.getLastRowNum() + 1;
 
-            // Fila P-099: todos los valores que repercuten en las 5 columnas
-            // de Resultado son 0:
+            // Fila P-099: todos los valores numericos que repercuten en
+            // Resultado son 0:
             //   - Sin imputaciones en extraccion.xlsx -> Jira=0 -> Facturar=0,
             //     PDCL=0
             //   - Sin entrada en deuda.xlsx (que no incluimos) -> PDCL+Deuda=0
-            //   - UltimaPrevision_Horas_Mes=0 -> Horas_Mes=0
-            // Por tanto las 5 columnas de Resultado para P-099 valen 0 y
-            // la fila debe filtrarse cuando mes.removeEmptyRows=true.
+            //   - UltimaPrevision_Horas_Mes="0.00" -> Horas_Mes=0
+            // Conserva ademas datos utiles (titulo, aplicacion, estado,
+            // responsable, matricula). Con el criterio actual del filtro
+            // (todas las celdas vacias o 0) la fila NO debe eliminarse:
+            // seria perder esos datos.
             Row r1 = s.createRow(next);
             r1.createCell(0).setCellValue("P-099");
             r1.createCell(1).setCellValue("Peticion totalmente vacia (v2.7.1 fixture)");
@@ -2744,12 +2939,15 @@ class ExcelMergerIntegrationTest {
     }
 
     /**
-     * v2.7.1: con {@code mes.removeEmptyRows=true} (default), una fila como
-     * P-099 (todas las 5 columnas a 0) debe eliminarse fisicamente del output.
-     * La fila P-100 (Horas_Mes&gt;0) debe sobrevivir.
+     * Correccion de diseno: con {@code mes.removeEmptyRows=true} (default),
+     * una fila como P-099 (columnas numericas a 0 pero con datos utiles:
+     * peticion, titulo, matricula, responsable...) NO debe eliminarse.
+     * El criterio antiguo de v2.7.1 (5 columnas numericas a 0) la habria
+     * borrado, descartando el dato. Las 20+2 filas siguen todas.
+     * La fila P-100 (Horas_Mes&gt;0) tambien sobrevive, como siempre.
      */
     @Test
-    void v271FilasConTodasLasColumnasACeroSeEliminan(@TempDir Path tmp) throws IOException {
+    void v271FilasConDatosUtilesNoSeEliminanAunqueSusColumnasNumericasValganCero(@TempDir Path tmp) throws IOException {
         Path inputDir = setupFixtureWithEmptyRows(tmp);
         Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
         Files.createDirectories(outputFile.getParent());
@@ -2774,9 +2972,10 @@ class ExcelMergerIntegrationTest {
                 }
             }
 
-            // P-099 ha desaparecido (filtrada)
-            assertThat(peticionesEnResultado).doesNotContain("P-099");
-            // P-100 sigue presente (Horas_Mes>0 la salva)
+            // 20 filas base + P-099 + P-100: ninguna se elimina.
+            assertThat(mes.getLastRowNum() + 1).isEqualTo(22);
+            // P-099 conserva sus datos (regresion de la correccion).
+            assertThat(peticionesEnResultado).contains("P-099");
             assertThat(peticionesEnResultado).contains("P-100");
             // Peticiones del fixture base siguen presentes
             assertThat(peticionesEnResultado).contains("P-001", "P-002", "P-014");
@@ -2822,15 +3021,15 @@ class ExcelMergerIntegrationTest {
     }
 
     /**
-     * v2.7.1: tras el filtrado, los SUMIFS de Resumen siguen siendo correctos.
-     * Verificamos con FormulaEvaluator que los totales por matricula NO incluyen
-     * la fila eliminada (P-099 con M-9999) y que la matricula M-9999 NO
-     * aparece en la primera tabla del Resumen (porque
-     * {@code SummarySheetBuilder.discoverMatriculas} lee filas FISICAS de
-     * Resultado, ya filtrado).
+     * Correccion de diseno: el Resumen es consistente con las filas
+     * FISICAS de Resultado. P-099 (columnas numericas a 0 pero con datos
+     * utiles) se conserva hoy, por lo que su matricula M-9999 SI aparece
+     * en la primera tabla del Resumen (con Jira 0). La matricula de
+     * P-100 (M-10000) tambien aparece, con Jira 0 porque no tiene
+     * imputaciones.
      */
     @Test
-    void v271FiltradoDejaResumenConsistente(@TempDir Path tmp) throws IOException {
+    void v271ResumenReflejaLasFilasConservadasEnResultado(@TempDir Path tmp) throws IOException {
         Path inputDir = setupFixtureWithEmptyRows(tmp);
         Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
         Files.createDirectories(outputFile.getParent());
@@ -2864,11 +3063,13 @@ class ExcelMergerIntegrationTest {
                 }
             }
 
-            // M-9999 (matricula de la fila P-099 filtrada) NO debe aparecer
+            // M-9999 (matricula de P-099, conservada) SI aparece: el
+            // Resumen descubre matriculas desde las filas fisicas de
+            // Resultado y esa fila no se elimina.
             assertThat(matriculasEnResumen)
-                    .as("M-9999 era la unica matricula de la fila filtrada; no debe aparecer en Resumen")
-                    .doesNotContain("M-9999");
-            // M-10000 (matricula de la fila P-100, no filtrada) SI aparece
+                    .as("P-099 se conserva; su matricula debe figurar en Resumen")
+                    .contains("M-9999");
+            // M-10000 (matricula de la fila P-100) SI aparece
             assertThat(matriculasEnResumen).contains("M-10000");
 
             // Verificacion adicional: sumar el Jira de la fila M-10000 debe
@@ -2960,12 +3161,14 @@ class ExcelMergerIntegrationTest {
     }
 
     /**
-     * v2.7.1: una matricula que solo tenia filas-cero NO genera fila ni en
-     * Resumen ni en las pivots de los responsables. Con M-9999 unica de
-     * P-099 (filtrada), NO debe aparecer en ningun sitio.
+     * Correccion de diseno: las hojas por responsable se descubren desde
+     * las filas FISICAS de Resultado. P-099 se conserva (sus columnas
+     * numericas valen 0 pero tiene datos utiles), por lo que su
+     * responsable trespFiltro@x SI tiene hoja; trespResta@x (P-100)
+     * tambien.
      */
     @Test
-    void v271MatriculasYResponsablesQueSoloTenianFilasCeroNoAparecen(@TempDir Path tmp) throws IOException {
+    void v271ResponsablesDeFilasConservadasSiTienenHoja(@TempDir Path tmp) throws IOException {
         Path inputDir = setupFixtureWithEmptyRows(tmp);
         Path outputFile = tmp.resolve("output").resolve("resultado.xlsx");
         Files.createDirectories(outputFile.getParent());
@@ -2985,16 +3188,16 @@ class ExcelMergerIntegrationTest {
 
         try (FileInputStream fis = new FileInputStream(outputFile.toFile());
              Workbook wb = WorkbookFactory.create(fis)) {
-            // El responsable de P-099 era trespFiltro@x. Como esa fila
-            // se ha filtrado, NO debe haber hoja para ese responsable.
+            // El responsable de P-099 es trespFiltro@x. Como la fila se
+            // conserva, SI debe haber hoja para ese responsable.
             assertThat(wb.getSheet("trespFiltro@x"))
-                    .as("trespFiltro@x solo tenia P-099 (filtrada); su hoja no debe existir")
-                    .isNull();
+                    .as("trespFiltro@x tiene P-099 (conservada); su hoja debe existir")
+                    .isNotNull();
 
             // El responsable de P-100 era trespResta@x; SI debe tener hoja
-            // (P-100 sobrevive por Horas_Mes>0).
+            // (P-100 tambien sobrevive).
             assertThat(wb.getSheet("trespResta@x"))
-                    .as("trespResta@x tiene P-100 (no filtrada); su hoja debe existir")
+                    .as("trespResta@x tiene P-100; su hoja debe existir")
                     .isNotNull();
         }
     }

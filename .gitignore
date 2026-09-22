@@ -1,6 +1,9 @@
 # Maven
-target/
-!target/excel-merger-3.1.0-jar-with-dependencies.jar
+# OJO: con 'target/' (directorio) excluido las negaciones de abajo no
+# funcionan (git no desciende a un directorio excluido) y los jars habria
+# que anadirlos con 'git add -f'. Con 'target/*' (hijos) si funcionan.
+target/*
+!target/excel-merger-3.2.0-jar-with-dependencies.jar
 !target/excel-merger.jar
 
 pom.xml.tag
