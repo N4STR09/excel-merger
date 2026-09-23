@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -168,5 +169,82 @@ class ConfigLoaderTest {
         assertThatThrownBy(() -> new ConfigLoader("config-pre.properties"))
                 .isInstanceOf(ConfigurationException.class)
                 .hasMessageContaining("config-pre.properties");
+    }
+
+    // ==================================================================
+    //  v4.1.0: overrides en runtime (ajustes de la interfaz web)
+    //  La interfaz persiste tres claves de salida y las aplica sobre la
+    //  configuracion base sin tocar el fichero. Menu y CLI cargan sin
+    //  overrides: comportamiento identico al de v3.x.
+    // ==================================================================
+
+    @Test
+    void overridesGananSobreElFicheroExternoYRespetanElResto(@TempDir Path tmp)
+            throws IOException {
+        Path cfg = tmp.resolve("my.properties");
+        Files.writeString(cfg,
+                "output.mode=cierre\nsummary.enabled=true\nkeep.key=original\n",
+                StandardCharsets.UTF_8);
+        Properties overrides = new Properties();
+        overrides.setProperty("output.mode", "completo");
+        overrides.setProperty("summary.byResponsible.enabled", "true");
+
+        ConfigLoader loader = new ConfigLoader(cfg.toString(), overrides);
+
+        // Las claves overrideadas vienen de la interfaz...
+        assertThat(loader.get("output.mode")).isEqualTo("completo");
+        assertThat(loader.get("summary.byResponsible.enabled")).isEqualTo("true");
+        // ... y el resto de la base sin cambios.
+        assertThat(loader.get("summary.enabled")).isEqualTo("true");
+        assertThat(loader.get("keep.key")).isEqualTo("original");
+        assertThat(loader.getRawProperties().stringPropertyNames())
+                .contains("output.mode", "keep.key");
+    }
+
+    @Test
+    void overridesGananSobreElFallbackDeClasspath() {
+        Properties overrides = new Properties();
+        overrides.setProperty("output.mode", "completo");
+
+        ConfigLoader loader = new ConfigLoader("test-config.properties", overrides);
+
+        assertThat(loader.get("output.mode")).isEqualTo("completo");
+        // El resto sigue viniendo del classpath.
+        assertThat(loader.get("merge.mode")).isEqualTo("SHEETS_SEPARATE");
+    }
+
+    @Test
+    void overridesNulosOVaciosNoCambianNada(@TempDir Path tmp) throws IOException {
+        Path cfg = tmp.resolve("my.properties");
+        Files.writeString(cfg, "output.mode=responsables\n", StandardCharsets.UTF_8);
+
+        assertThat(new ConfigLoader(cfg.toString(), null).get("output.mode"))
+                .isEqualTo("responsables");
+        assertThat(new ConfigLoader(cfg.toString(), new Properties()).get("output.mode"))
+                .isEqualTo("responsables");
+    }
+
+    @Test
+    void constructorConSoloOverridesUsaElConfigPorDefecto() {
+        // Sin ruta: cae al config.properties del directorio de trabajo
+        // (o al embebido) y aplica los overrides encima. Aqui solo
+        // interesa que el override gane, sea cual sea la base.
+        Properties overrides = new Properties();
+        overrides.setProperty("output.mode", "responsables");
+
+        ConfigLoader loader = new ConfigLoader(overrides);
+
+        assertThat(loader.get("output.mode")).isEqualTo("responsables");
+    }
+
+    @Test
+    void overridesVaciosDesdePropertiesNoAnadenNada(@TempDir Path tmp) throws IOException {
+        Path cfg = tmp.resolve("my.properties");
+        Files.writeString(cfg, "solo.una=clave\n", StandardCharsets.UTF_8);
+
+        ConfigLoader loader = new ConfigLoader(cfg.toString(), new Properties());
+
+        assertThat(loader.get("solo.una")).isEqualTo("clave");
+        assertThat(loader.getRawProperties().stringPropertyNames()).containsExactly("solo.una");
     }
 }

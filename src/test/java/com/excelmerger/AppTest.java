@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -113,6 +114,38 @@ class AppTest {
 
         int exitCode = App.run(cfg.toString());
         assertThat(exitCode).isEqualTo(App.EXIT_CONFIG);
+    }
+
+    // =================================================================
+    //  v4.1.0: overrides en runtime (ajustes de la interfaz web)
+    //  La interfaz aplica las tres claves de salida sobre la configuracion
+    //  base; aqui se comprueba que el flujo completo de App las respeta
+    //  de punta a punta (carga, validacion y merge).
+    // =================================================================
+
+    @Test
+    void runConOverridesDeSalidaCompletaExitOk(@TempDir Path tmp) throws IOException {
+        Path cfg = preparedConfig(tmp);
+        // La base de fixtures puede traer cierre; la interfaz web fuerza
+        // el modo completo con Resumen y matriz por responsable.
+        Properties overrides = new Properties();
+        overrides.setProperty("output.mode", "completo");
+        overrides.setProperty("summary.enabled", "true");
+        overrides.setProperty("summary.byResponsible.enabled", "true");
+
+        int exitCode = App.run(cfg.toString(), overrides);
+
+        assertThat(exitCode).isEqualTo(App.EXIT_OK);
+        assertThat(tmp.resolve("output").resolve("resultado.xlsx")).exists();
+    }
+
+    @Test
+    void runConOverridesNulosEsIdenticoASinOverrides(@TempDir Path tmp) throws IOException {
+        Path cfg = preparedConfig(tmp);
+
+        int exitCode = App.run(cfg.toString(), null);
+
+        assertThat(exitCode).isEqualTo(App.EXIT_OK);
     }
 
     // =================================================================

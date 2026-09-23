@@ -94,7 +94,7 @@ class InteractiveMenuTest {
         // no aparecen como string literal. Lo que SI aparece literal en
         // el output del banner es la version (linea final del ASCII) y
         // la linea descriptiva debajo.
-        assertThat(output).contains("v3.2.0");
+        assertThat(output).contains("v4.4.0");
         assertThat(output).contains("Fusion de exports ERP + Jira");
         // Verifica tambien que hay multiples lineas con caracter '|',
         // que es signature del ASCII art Figlet standard.

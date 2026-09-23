@@ -3,7 +3,7 @@
 # funcionan (git no desciende a un directorio excluido) y los jars habria
 # que anadirlos con 'git add -f'. Con 'target/*' (hijos) si funcionan.
 target/*
-!target/excel-merger-3.2.0-jar-with-dependencies.jar
+!target/excel-merger-4.1.0-jar-with-dependencies.jar
 !target/excel-merger.jar
 
 pom.xml.tag
@@ -12,6 +12,12 @@ pom.xml.versionsBackup
 pom.xml.next
 release.properties
 dependency-reduced-pom.xml
+
+# Sesion de la interfaz web local (puerto/token estables; generado)
+web.properties
+
+# Sesion de la interfaz web local (ajustes de salida en runtime; generado)
+web-settings.properties
 
 # IDE
 .idea/

@@ -87,5 +87,31 @@
         <Bug pattern="CT_CONSTRUCTOR_THROW"/>
     </Match>
 
+    <!--
+        MS_EXPOSE_REP en LogCapture.install().
+
+        Justificacion (v4.0.0, spike web): el LogBuffer devuelto ES el
+        recurso compartido, no una fuga accidental. El patron es un
+        Singleton compartido a proposito: el espejo de System.out (que
+        recoge la consola de logback y la salida de CompareRunner)
+        escribe en el, y WebServer lo lee desde los hilos HTTP para
+        pintar el panel de la interfaz. Exponerlo es la API: sin la
+        referencia no hay forma de consumirlo.
+
+        Seguridad de la mutacion: LogBuffer es una clase ad-hoc con todos
+        los metodos synchronized y sin setters; no expone arrays ni
+        colecciones internas (since() devuelve copia). No hay ningun
+        campo publico estatico mutable: BUFFER es private static final.
+
+        Excluir install() es por tanto intencion y no relajacion del
+        umbral: el detector no distingue "devuelve un singleton de
+        dominio" de "devuelve un campo estatico mutable cualquiera".
+    -->
+    <Match>
+        <Class name="com.excelmerger.web.LogCapture"/>
+        <Method name="install"/>
+        <Bug pattern="MS_EXPOSE_REP"/>
+    </Match>
+
 </FindBugsFilter>
 

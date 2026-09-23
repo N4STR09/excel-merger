@@ -6,6 +6,7 @@ Herramienta Java para fusionar dos ficheros Excel en uno solo, con:
 - Generación de una hoja resumen (`Resultado`) con columnas copia, fórmulas (SUMIFS, VLOOKUP…) y formato condicional.
 - Tablas de mapeo auxiliares (lookups) embebidas en el propio Excel resultado.
 - Configuración totalmente externa en `config.properties`, editable sin recompilar.
+- Interfaz web local (v4.0.0): al arrancar sin argumentos se abre en el navegador con los mismos flujos que el menú de terminal — y un solo doble clic basta: dirección siempre igual, carpetas de trabajo auto-creadas y mostradas en la página, y acceso directo en el escritorio. Tema claro y **modo oscuro** con toggle (preferencia guardada en el navegador). Para scripts, modos headless (`--merge`, `--compare`) con los exit codes 0-4. **El resultado se configura desde la propia página (v4.4.0)**: elige el modo de generación (resumen clásico, por responsable o completo) y activa/desactiva la hoja *Resumen* y su *tabla por responsable*; se guarda automáticamente en `web-settings.properties` y se aplica a cada fusión, sin tocar `config.properties`. Por defecto restaura la salida completa de v3.1.0 (el modo `completo`).
 
 ## Estructura del proyecto
 
@@ -13,16 +14,24 @@ Herramienta Java para fusionar dos ficheros Excel en uno solo, con:
 excel-merger/
 ├── pom.xml                      # Configuración Maven
 ├── config.properties            # ⚙️ Configuración editable
-├── run.bat                      # Lanzador Windows (doble clic)
+├── run.bat                      # Lanzador Windows fino (reenvía los args al JAR)
+├── package.bat                  # Empaquetado portátil (jpackage app-image + zip)
 ├── input/                       # 📂 Coloca aquí los dos Excel de entrada
 ├── output/                      # Aquí se genera el resultado
 ├── src/main/
 │   ├── java/com/excelmerger/
-│   │   ├── Main.java                    # Punto de entrada (menú interactivo, v3.0.0)
+│   │   ├── Main.java                    # Punto de entrada: modos (web, --cli, --merge, --compare; v4.0.0)
 │   │   ├── App.java                     # Lógica de fusión (v3.0.0, extraída de Main)
 │   │   ├── cli/
-│   │   │   ├── InteractiveMenu.java     # Menú JLine (v3.0.0)
+│   │   │   ├── InteractiveMenu.java     # Menú JLine (v3.0.0, ahora tras --cli)
 │   │   │   └── BannerPrinter.java       # Banner ASCII art (v3.0.0)
+│   │   ├── web/                         # Interfaz web local (v4.4.0)
+│   │   │   ├── WebLauncher.java         # Arranque: servidor + URL + navegador
+│   │   │   ├── WebServer.java           # HTTP en loopback con token
+│   │   │   ├── WebSession.java          # Sesión estable: puerto + token (web.properties)
+│   │   │   ├── SettingsStore.java       # Ajustes de salida en runtime (web-settings.properties; v4.4.0)
+│   │   │   ├── LogCapture.java          # Espejo de log/stdout hacia la UI
+│   │   │   └── Json, LogBuffer, LineMirror   # JSON a mano y buffer de log
 │   │   ├── ConfigLoader.java            # Carga del config en UTF-8
 │   │   ├── ConfigValidator.java         # Validación previa del config
 │   │   ├── RunReport.java               # Acumula hojas/warnings del run
@@ -34,9 +43,10 @@ excel-merger/
 │   │   ├── DerivedSheetBuilder.java     # Hojas derivadas (fórmulas/agregación)
 │   │   └── LookupSheetBuilder.java      # Tablas de mapeo estáticas
 │   └── resources/
-│       └── config.properties            # Fallback empaquetado en el JAR
+│       ├── config.properties            # Fallback empaquetado en el JAR
+│       └── web/                         # UI: index.html, app.css, app.js (v4.4.0)
 ├── src/test/
-│   ├── java/com/excelmerger/            # Suite JUnit 5 (31 clases, 484 tests)
+│   ├── java/com/excelmerger/            # Suite JUnit 5 (37 clases, 549 tests)
 │   └── resources/
 │       ├── test-config.properties       # Config con placeholders para tests
 │       └── fixtures/                    # extraccion.xlsx, cierre.xlsx, deuda.xlsx
@@ -45,7 +55,7 @@ excel-merger/
 
 ## Requisitos
 
-- **Java 25** (Oracle JDK o cualquier distribución compatible).
+- **Java 25** (Oracle JDK o cualquier distribución compatible). Solo hace falta para compilar: el `.zip` portátil generado por `package.bat` lleva su propio runtime y **no requiere Java instalado**.
 - Maven 3.9+ **opcional**: el proyecto incluye Maven Wrapper (`mvnw` / `mvnw.cmd`), así que no hace falta tener Maven instalado. La primera ejecución del wrapper descarga Maven 3.9.9 a `~/.m2/wrapper/dists/`.
 
 ## Compilación
@@ -66,7 +76,31 @@ O bien, si ya tienes Maven en el sistema:
 mvn clean package
 ```
 
-Genera `target/excel-merger-3.2.0-jar-with-dependencies.jar` (además del jar sin dependencias `target/excel-merger.jar`).
+Genera `target/excel-merger-4.4.0-jar-with-dependencies.jar` (además del jar sin dependencias `target/excel-merger.jar`).
+
+### Empaquetado portátil (v4.0.0)
+
+`package.bat` construye el JAR y lo empaqueta con `jpackage` (va incluido en el JDK 25):
+
+```bash
+package.bat
+```
+
+Salida:
+
+- `target\dist\ExcelMerger\` — imagen de aplicación autocontenida con runtime embebido (arranca con `ExcelMerger.exe`), con las carpetas `input\` y `output\` —y su `LEEME.txt`— ya dentro antes del primer arranque.
+- `target\excel-merger-win64-portable.zip` — la misma imagen comprimida: se descomprime en cualquier carpeta y se usa, con las carpetas de trabajo listas desde el minuto cero. **Nunca genera instalador** (decisión de v4.0.0: solo portátil).
+
+El launcher es de tipo consola (`--win-console`), así que `--cli`, la URL y los exit codes siguen visibles en la terminal.
+
+**Inicio rápido con el zip (usuario final)** — solo la primera vez:
+
+1. Descomprime `excel-merger-win64-portable.zip` en el Escritorio (el zip ya trae dentro la carpeta `ExcelMerger\`, **con `input\` y `output\` ya creadas** —cada una con su `LEEME.txt`—, incluso antes de ejecutar nada).
+2. Doble clic en `ExcelMerger\ExcelMerger.exe`: se abre el navegador con la interfaz y aparece el acceso directo **ExcelMerger** en el escritorio. (Si borras las carpetas, el programa las vuelve a crear solo.)
+3. Suelta tus dos Excel en `input\` — la propia página te muestra la ruta exacta — y pulsa *Fusión*.
+4. El resultado queda en `output\`.
+
+De ahí en adelante todo es: **doble clic al icono del escritorio → misma dirección siempre (`http://127.0.0.1:7420/?token=…`) → tus Excel en `input\` → *Fusión***. Si ya está en ejecución, el doble clic solo abre el navegador; nunca hay dos copias a la vez.
 
 ## Tests
 
@@ -96,20 +130,20 @@ El `verify` aplica además cuatro gates automáticos:
 
 ### Organización
 
-- **31 clases y 484 tests** en `src/test/java/com/excelmerger/` y sus subpaquetes (`cli`, `compare`, `config`, `io`, `sheet.column`, `util`): `AppTest`, `AvisosSheetBuilderTest`, `ConfigLoaderTest`, `ConfigValidatorTest`, `DerivedSheetBuilderTest`, `EmptyRowFilterTest`, `ExcelMergerIntegrationTest`, `FileProfileResolverTest`, `LookupSheetBuilderTest`, `MainTest`, `MesSheetBuilderTest`, `OutputModeTest`, `ResponsablePivotBuilderTest`, `ResponsablesSheetBuilderTest`, `ResponsablesSheetBuilderV24Test`, `RunReportTest`, `SummarySheetBuilderTest`, `BannerPrinterTest`, `InteractiveMenuTest`, `CompareRunnerIntegrationTest`, `CsvParserTest`, `DiscrepancyComparatorTest`, `DiscrepancyExporterTest`, `ResultadoReaderTest`, `MesConfigSectionTest`, `SummaryConfigSectionTest`, `ValidationHelpersTest`, `FileLockDetectorTest`, `OutputManagerTest`, `FormulaPlusSumIfsColumnStrategyTest`, `PoiUtilsTest`.
+- **37 clases y 549 tests** en `src/test/java/com/excelmerger/` y sus subpaquetes (`cli`, `compare`, `config`, `io`, `sheet.column`, `util`, `web`): `AppTest`, `AvisosSheetBuilderTest`, `ConfigLoaderTest`, `ConfigValidatorTest`, `DerivedSheetBuilderTest`, `EmptyRowFilterTest`, `ExcelMergerIntegrationTest`, `FileProfileResolverTest`, `LookupSheetBuilderTest`, `MainTest`, `MesSheetBuilderTest`, `OutputModeTest`, `ResponsablePivotBuilderTest`, `ResponsablesSheetBuilderTest`, `ResponsablesSheetBuilderV24Test`, `RunReportTest`, `SummarySheetBuilderTest`, `BannerPrinterTest`, `InteractiveMenuTest`, `CompareRunnerIntegrationTest`, `CsvParserTest`, `DiscrepancyComparatorTest`, `DiscrepancyExporterTest`, `ResultadoReaderTest`, `MesConfigSectionTest`, `SummaryConfigSectionTest`, `ValidationHelpersTest`, `FileLockDetectorTest`, `OutputManagerTest`, `FormulaPlusSumIfsColumnStrategyTest`, `PoiUtilsTest`, `WebServerTest`, `WebSessionTest`, `SettingsStoreTest`, `LogBufferTest`, `LineMirrorTest`, `JsonTest`.
 - **`TestFixtures.java`** es la utilidad compartida: copia los fixtures a un `@TempDir`, renderiza `test-config.properties` sustituyendo `${TEST_INPUT_DIR}` / `${TEST_OUTPUT_FILE}`, y ofrece `configFromProperties(...)` para tests unitarios que no tocan disco.
 - Todos los tests usan `@TempDir`; no hay efectos colaterales fuera del directorio temporal de cada caso.
 
-### Pruebas manuales del `run.bat` (v1.4.0)
+### Pruebas manuales del `run.bat` (v4.0.0)
 
-La lógica de resolución de alias de entorno vive en batch, fuera de la red de seguridad JUnit. Para validarla en Windows, tres casos rápidos desde `cmd` en la carpeta del proyecto:
+`run.bat` es un wrapper fino: reenvía los argumentos al JAR tal cual, propaga el exit code y solo hace `pause` cuando se lanza **sin** argumentos (doble clic). Desde `cmd` en la carpeta del proyecto:
 
-| Caso                           | Comando                         | Resultado esperado                                                                 |
-| ------------------------------ | ------------------------------- | ---------------------------------------------------------------------------------- |
-| Sin argumento                  | `run.bat`                       | El JAR arranca con `config.properties`. Log: `Ejecutando: ...jar`.                 |
-| Alias con fichero existente    | `run.bat contabilidad`          | Si existe `config-contabilidad.properties`, el JAR arranca con él. Log: `Ejecutando: ...jar con config 'config-contabilidad.properties'`. |
-| Alias con fichero inexistente  | `run.bat pre`                   | Sin `config-pre.properties`: el `.bat` imprime `[ERROR] No se encuentra el fichero de configuracion: config-pre.properties` y sale con `exit /b 2` sin arrancar Java. |
-| Ruta `.properties` explícita   | `run.bat otra-carpeta\x.properties` | Se pasa tal cual al JAR (misma regla: case-insensitive sobre el sufijo). |
+| Caso                    | Comando            | Resultado esperado                                                                       |
+| ----------------------- | ------------------ | ---------------------------------------------------------------------------------------- |
+| Sin argumento           | `run.bat`          | Abre la interfaz web local; al terminar, muestra el resultado con `pause`.               |
+| Menú de terminal        | `run.bat --cli`    | Menú interactivo idéntico al de v3.x; opción 3 → exit 0.                                 |
+| Headless                | `run.bat --merge`  | Fusión directa sin pausa; el exit code 0-4 se propaga al `cmd`.                          |
+| Argumento desconocido   | `run.bat --mierda` | Imprime `Argumento desconocido: ...` + el uso por stderr y sale con exit 2, sin `pause`. |
 
 ### Fixtures
 
@@ -132,14 +166,57 @@ El `pom.xml` configura JaCoCo 0.8.14 con umbral **70% INSTRUCTION a nivel de bun
 
 ## Ejecución
 
-### Menú interactivo (v3.0.0, ampliado en v3.1.0)
+### Modos de ejecución (v4.0.0)
 
-A partir de v3.0.0 el JAR muestra **siempre** un menú interactivo al arrancar. Ya **no se aceptan argumentos en la línea de comandos**: las antiguas flags `--help`, `--version`, `--dry-run` y el config posicional `<configPath>` han sido eliminados.
+| Lanzamiento | Qué hace |
+| --- | --- |
+| Sin argumentos (`run.bat`, `java -jar ...`) | **Interfaz web local**: imprime la URL estable y abre el navegador; si ya está en ejecución, solo abre el navegador. |
+| `--cli` | Menú interactivo de terminal, idéntico al de v3.x (JLine). |
+| `--merge` | Fusión directa con `config.properties`, sin interacción. Devuelve exit code 0-4. |
+| `--compare` | Comprobador de discrepancias directo, sin interacción. Devuelve exit code 0-4. |
+| `--help` / `-h` | Uso por stdout, exit 0. Argumento desconocido: uso por stderr, exit 2. |
 
-Al ejecutar:
+`run.bat` reenvía cualquier argumento al JAR, así que `run.bat --cli`, `run.bat --merge`, etc. funcionan igual. La CLI argumentada antigua (v2.7.1: `--dry-run`, `<configPath>`, ...) **no** vuelve: el config sigue siendo siempre `config.properties` del directorio de trabajo.
+
+### Interfaz web local (v4.4.0, por defecto)
+
+Al ejecutar sin argumentos:
 
 ```bash
-java -jar target/excel-merger-3.2.0-jar-with-dependencies.jar
+java -jar target/excel-merger-4.4.0-jar-with-dependencies.jar
+```
+
+se imprime algo así:
+
+```
+INFO  Servidor web local listo: http://127.0.0.1:7420/?token=nZxT-s27VQQ50Y0mc55T9A
+
+Excel Merger (interfaz web local)
+  http://127.0.0.1:7420/?token=nZxT-s27VQQ50Y0mc55T9A
+  Tus Excel: C:\...\ExcelMerger\input
+  Resultado: C:\...\ExcelMerger\output
+  Salida: modo 'completo', hoja Resumen si, tabla por responsable si (cambiable desde la interfaz)
+  El 'Salir' de la interfaz cierra el proceso con codigo 0.
+  Ctrl+C en esta terminal tambien termina.
+INFO  Acceso directo en el escritorio: ExcelMerger.lnk (repite este icono para abrir la interfaz).
+```
+
+y se abre esa URL en el navegador automáticamente (si tu entorno no puede, pega a mano esa misma URL: **es estable, no cambia entre arranques**). La página reproduce 1:1 el menú de terminal:
+
+- **Dirección siempre igual (loopback + token persistido)**: escucha en `127.0.0.1:7420` —si el puerto está ocupado, prueba `7421..7430` y por último uno libre— y el token se guarda en `web.properties` (fichero generado junto al `config.properties`, ignorado por git). También se acepta el token en la cabecera `X-Em-Token`; en la página vive en `sessionStorage` y se borra de la barra de direcciones; las peticiones sin token o con `Origin` ajeno se rechazan. **Un solo proceso**: si el servidor ya está vivo, un nuevo doble clic solo abre el navegador y sale con 0 (no levanta otra copia).
+- **Carpetas visibles**: el arranque crea `input/` y `output/` (según `config.properties`) si faltan, y la página —junto a `/api/info`, campos `inputDir`/`outputDir`— muestra las rutas absolutas donde dejar tus Excel y dónde se guarda el resultado. **Acceso directo**: la primera ejecución del `.exe` empaquetado crea (o repone) `ExcelMerger.lnk` en el escritorio; en desarrollo, sin `.exe` junto al directorio de trabajo, se omite.
+- **Botones = opciones del menú**: *Fusión* ejecuta la Opción 1 (`App.run`, mismo `config.properties`), *Comprobador* la Opción 2, y el log del proceso aparece en vivo en la página.
+- **El resultado se configura en la página (v4.4.0)**: el panel *Cómo quieres el resultado* ofrece el modo de generación (`cierre` = resumen clásico, `responsables` = una hoja por responsable, `completo` = ambos) y dos interruptores (hoja *Resumen* y *tabla por responsable* en ella). Cada cambio se persiste al vuelo en `web-settings.properties` (junto al `web.properties`, ignorado por git) y se aplica a la *próxima* fusión; la página muestra una vista previa de las hojas resultantes. **Default = `completo`**: sin configurar nada se restaura la salida completa de v3.1.0. Solo afecta a las fusiones de la interfaz web: menú (`--cli`), `--merge` y `--compare` siguen usando únicamente `config.properties`. La API añade `GET /api/settings` y `POST /api/settings` (con token, JSON mínimo sin librerías nuevas).
+- **Exit codes por ejecución** (decisión v4.0.0 "split"): cada ejecución muestra su propio código 0-4 con su etiqueta; el proceso en sí solo devuelve 0 (botón *Salir* o Ctrl+C) o 1 si el servidor no puede arrancar.
+- **Una operación a la vez**: si ya hay una fusión/comprobación en curso, la API responde 409 y la UI lo indica.
+- *Salir* muestra un diálogo de confirmación y cierra el proceso con código 0 (equivalente a la Opción 3). Cerrar la pestaña **no** termina el proceso.
+
+### Menú interactivo (`--cli`, ampliado en v3.1.0)
+
+Con `--cli` (o `run.bat --cli`):
+
+```bash
+java -jar target/excel-merger-4.4.0-jar-with-dependencies.jar --cli
 ```
 
 aparece algo así:
@@ -150,7 +227,7 @@ aparece algo así:
  |  _| \ \/ / __/ _ \ | | | |\/| |/ _ \ '__/ _` |/ _ \ '__|
  | |___ >  < (_|  __/ | | | |  | |  __/ | | (_| |  __/ |
  |_____/_/\_\___\___| |_| |_|  |_|\___|_|  \__, |\___|_|
-                                           |___/     v3.2.0
+                                           |___/     v4.4.0
 
  Fusion de exports ERP + Jira para cierre mensual
 
@@ -173,7 +250,7 @@ Cualquier opción inválida (`4`, letras, vacío, espacios) muestra `Opcion inva
 
 ### Windows (doble clic)
 
-Doble clic en `run.bat`. El `.bat` arranca el JAR y al cerrar muestra el resultado con `pause` para que la ventana no se cierre antes de leerlo. Ya **no acepta argumentos**; si los pasas, se ignoran con un aviso.
+Doble clic en `run.bat` (sin argumentos): arranca la interfaz web local, idéntico a `java -jar` sin argumentos, y al cerrar muestra el resultado con `pause` para que la ventana no se cierre antes de leerlo. Con argumentos (`run.bat --cli`, `run.bat --merge`, ...) los reenvía al JAR, propaga el exit code y **no** hace `pause`, para que sirva en scripts.
 
 Para mantener varios entornos (`config-contabilidad.properties`, `config-soporte.properties`, etc.), copia o renombra el deseado a `config.properties` antes de lanzar:
 
@@ -205,7 +282,22 @@ Si en v2.7.1 lanzabas:
 | `java -jar excel-merger.jar --version` | Eliminado. La versión se muestra en el banner del menú |
 | `run.bat contabilidad` | `copy /Y config-contabilidad.properties config.properties` y luego `run.bat` |
 
-**Cron / CI**: la entrada interactiva implica que **ya no se puede ejecutar Excel Merger sin TTY**. Si lo lanzabas desde un job programado, será necesario esperar a la versión que reintroduzca un modo no-interactivo (planificado para una v3.x posterior, no para 3.0.0).
+> Nota (v4.0.0): "sin argumentos" ya **no** es el menú sino la interfaz web local, y `--help` vuelve a existir como ayuda de modos — ver *Migración desde v3.2.0 a v4.0.0*, más abajo.
+
+**Cron / CI**: la promesa de "un modo no-interactivo para una v3.x posterior" se cumple en **v4.0.0**: `java -jar ... --merge` y `... --compare` corren sin TTY y devuelven los exit codes 0-4 (en v3.0.0–v3.2.0 hacía falta TTY porque el menú era obligatorio).
+
+### Migración desde v3.2.0 a v4.0.0
+
+| v3.2.0 | v4.0.0 |
+|--------|--------|
+| `run.bat` / `java -jar ...` → menú interactivo | Abre la **interfaz web local**. El menú: `run.bat --cli` o `... --cli`. |
+| Opciones 1 / 2 / 3 del menú | Botones *Fusión* / *Comprobador* / *Salir* en la web, o el mismo menú con `--cli`. |
+| Job sin TTY imposible | `--merge` / `--compare` devuelven 0-4 sin interacción. |
+| `run.bat` con argumentos → aviso y los ignoraba | Los reenvía (`run.bat --merge` ejecuta la fusión directa). Argumento desconocido → uso + exit 2. |
+| Sin `--help` (eliminado en v3.0.0) | `--help` / `-h` → uso, exit 0. |
+| Despliegue: copiar JRE + jar | `package.bat` genera `excel-merger-win64-portable.zip` con runtime incluido. |
+
+El motor no cambia: mismas salidas, mismos textos literales, mismas claves de config y mismos exit codes 0-4.
 
 ### Opción 2: Comprobador de discrepancias contra CSV (v3.1.0)
 
@@ -272,7 +364,7 @@ El timestamp del nombre asegura que ejecuciones sucesivas no se sobrescriben: ca
 #### Ejemplo de uso
 
 ```
-$ java -jar target/excel-merger-3.2.0-jar-with-dependencies.jar
+$ java -jar target/excel-merger-4.4.0-jar-with-dependencies.jar --cli
 [banner ASCII]
 ¿Que quieres hacer?
 
@@ -431,15 +523,18 @@ El rango de los SUMIFS se acota con la clave existente `summary.sumifsMaxRow` (c
 
 ```bash
 # Cierre completo del mes (comportamiento histórico):
-java -jar excel-merger.jar config.properties
+# (output.mode=cierre, o la clave ausente)
+java -jar excel-merger.jar --merge
 
 # Solo Resultado + plantillas vacías por responsable para repartir:
-# (en el config: output.mode=responsables)
-java -jar excel-merger.jar config-responsables.properties
+# (en el config: output.mode=responsables — cópialo como config.properties)
+cp config-responsables.properties config.properties
+java -jar excel-merger.jar --merge
 
 # Todo en un único libro: cierre + plantillas por responsable:
-# (en el config: output.mode=completo)
-java -jar excel-merger.jar config-completo.properties
+# (en el config: output.mode=completo — cópialo como config.properties)
+cp config-completo.properties config.properties
+java -jar excel-merger.jar --merge
 ```
 
 #### Comportamiento de `Deuda` en modo `responsables`
@@ -821,10 +916,12 @@ Desde la v1.3.0 el CLI devuelve códigos de salida tipados según la clase de ex
 | `3`    | Entrada inválida: directorio o ficheros Excel mal, lock sobre un input       | `InputValidationException`  |
 | `4`    | Salida inválida: lock sobre el output, `overwrite=false` con output existente, fallo de escritura/backup | `OutputException` |
 
+> **v4.0.0**: en la interfaz web local cada ejecución muestra su propio código 0-4 en la página, mientras que el proceso solo devuelve 0 (salida ordenada) o 1 (fallo de arranque). Los modos `--merge` y `--compare` devuelven estos códigos a nivel de proceso, y un argumento desconocido devuelve `2`.
+
 Todas las excepciones heredan de `com.excelmerger.exception.ExcelMergerException` (runtime). Scripts que integren el merger pueden ramificar por código; por ejemplo:
 
 ```bash
-java -jar excel-merger.jar
+java -jar excel-merger.jar --merge
 code=$?
 case $code in
   0) echo "OK" ;;

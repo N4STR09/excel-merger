@@ -5,12 +5,15 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests del banner de versión y de la carga de {@code git.properties}.
+ * Tests del banner de versión, de la carga de {@code git.properties} y de
+ * la detección de modos de arranque (v4.0.0).
  *
  * <p>Notas:</p>
  * <ul>
  *   <li>No se invoca {@link Main#main(String[])} porque usa {@code System.exit(...)} y
- *       destruiría la JVM del runner de tests.</li>
+ *       destruiría la JVM del runner de tests: la lógica de modos se
+ *       prueba vía {@link Main#parseMode(String...)} y
+ *       {@link Main#printUsage(java.io.PrintStream)}.</li>
  *   <li>En entorno de tests el recurso {@code /git.properties} puede estar presente
  *       (si el build ha corrido el plugin) o ausente. El test debe verificar que
  *       {@link Main#buildInfoString()} NO rompe en ninguno de los dos casos y que el
@@ -182,6 +185,70 @@ class MainTest {
         //        Funcion; y los triples de Deuda sin contrapartida se emiten
         //        como filas huerfanas (mes.orphans.enabled). Sin claves de
         //        config nuevas. Ver CHANGELOG [3.2.0].
-        assertThat(Main.APP_VERSION).isEqualTo("3.2.0");
+        // 4.0.0: BREAKING (solo superficie de arranque). Sin argumentos el
+        //        JAR abre la interfaz web local; el menu de terminal sigue
+        //        identico tras --cli y se anaden los modos headless
+        //        --merge/--compare (exit 0-4 en proceso) y --help. run.bat
+        //        pasa a wrapper fino que reenvia argumentos, y package.bat
+        //        genera un zip portatil con jpackage (app-image, nunca
+        //        instalador). Motor, textos literales y claves de config
+        //        sin cambios. Ver CHANGELOG [4.0.0].
+        // 4.1.0: la interfaz web anade ajustes de salida en runtime
+        //        (mode, Resumen y tabla por responsable) que se aplican
+        //        solo a sus ejecuciones; menu y CLI sin cambios. Ver
+        //        CHANGELOG [4.1.0].
+        assertThat(Main.APP_VERSION).isEqualTo("4.4.0");
+    }
+
+    // ------------------------------------------------------------------
+    // v4.0.0: detección de modos en la línea de comandos
+    // ------------------------------------------------------------------
+
+    @Test
+    void sinArgumentosONuloArrancaLaInterfazWeb() {
+        assertThat(Main.parseMode(new String[0])).isEqualTo(Main.Mode.WEB);
+        assertThat(Main.parseMode(null)).isEqualTo(Main.Mode.WEB);
+    }
+
+    @Test
+    void cliConservaElMenuDeTerminal() {
+        assertThat(Main.parseMode(new String[]{"--cli"})).isEqualTo(Main.Mode.CLI);
+    }
+
+    @Test
+    void mergeYCompareSonLosModosDirectos() {
+        assertThat(Main.parseMode(new String[]{"--merge"})).isEqualTo(Main.Mode.MERGE);
+        assertThat(Main.parseMode(new String[]{"--compare"})).isEqualTo(Main.Mode.COMPARE);
+    }
+
+    @Test
+    void helpEnSusDosFormas() {
+        assertThat(Main.parseMode(new String[]{"--help"})).isEqualTo(Main.Mode.HELP);
+        assertThat(Main.parseMode(new String[]{"-h"})).isEqualTo(Main.Mode.HELP);
+    }
+
+    @Test
+    void cualquierOtroArgumentoEsDesconocido() {
+        assertThat(Main.parseMode(new String[]{"--version"})).isEqualTo(Main.Mode.UNKNOWN);
+        assertThat(Main.parseMode(new String[]{"contabilidad"})).isEqualTo(Main.Mode.UNKNOWN);
+        assertThat(Main.parseMode(new String[]{"--merg"})).isEqualTo(Main.Mode.UNKNOWN);
+    }
+
+    @Test
+    void gobiernaElPrimerArgumentoYLosDemasSeIgnoran() {
+        assertThat(Main.parseMode(new String[]{"--merge", "extra"})).isEqualTo(Main.Mode.MERGE);
+        assertThat(Main.parseMode(new String[]{"--cli", "--merge"})).isEqualTo(Main.Mode.CLI);
+    }
+
+    @Test
+    void printUsageDocumentaLosModosYLosExitCodes() {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        Main.printUsage(new java.io.PrintStream(buffer));
+
+        String ayuda = buffer.toString(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(ayuda)
+                .contains("(sin argumentos)", "--cli", "--merge", "--compare", "--help")
+                .contains("0-4");
     }
 }

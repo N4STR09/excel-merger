@@ -1,5 +1,181 @@
 # Changelog
 
+## [4.4.0] — Identidad esmeralda: fondo de imagen real + vidrio auténtico
+
+Versión menor sobre v4.3.0. **El motor no cambia en nada**: mismos ficheros, rutas, contenidos, textos, exit codes 0-4 y endpoints. Solo cambia la capa visual de la interfaz web —y la versión de cache-bust, que pasa a `v4.4.0` para que el navegador deje de servir la UI antigua aunque la tuviera en caché.
+
+### Cambiado
+
+- **Verde esmeralda como color primario**: la paleta azul/cían del tema anterior se sustituye por la familia del verde esmeralda en ambos temas (claro: acento `#0d7a4f`, degradados `#10b981 → #0d9488`; oscuro: acento `#34d399`, degradados `#10b981 → #2dd4bf`). Favicon, marca, hero, acciones, interruptores, LED y consola siguen los mismos tokens.
+- **Fondo de imagen real**: el fondo *aurora* (CSS) desaparece. Ahora `body` apoya la página sobre una **imagen real incrustada como data-URI WebP** en `app.css` —un mesh de orbes esmeralda con grano y viñeta—, de tonalidad **media-luz para el tema claro** y **media-oscura para el oscuro**. Al ir embebida en CSS no se añaden rutas ni ficheros al servidor; la aplicación sigue siendo un único jar auto-contenido.
+- **Glassmorphism que transparenta de verdad**: los bloques de cristal (topbar, tarjetas de acción, ajustes, rutas, diálogo, off-card) reducen su alfa (`0.55–0.86`) y combinan `backdrop-filter: blur(22px) saturate(1.35)`, de modo que la imagen de fondo **se ve y se difumina** a través de cada panel, en ambos temas. Las tarjetas de acción ya no se vuelven sólidas en modo claro. La consola sigue siendo la única «máquina» sólida y oscura, ancla de contraste en ambos temas.
+- **Contraste AA en ambos temas** (medido sobre el compuesto real de vidrio + imagen): claro — tinta 16.3:1, secundario 7.7:1, tenue 4.6:1, esmeralda 4.9:1, blanco sobre esmeralda 5.4:1; oscuro — tinta 15.3:1, secundario 9.2:1, tenue 6.4:1, esmeralda 9.0:1, ambar 10.4:1, rojo 6.3:1. Variantes `prefers-reduced-motion`, `prefers-reduced-transparency` (vidrio → sólido) y `prefers-contrast: more` (refuerza líneas y tinta, oculta el velo de protección del texto) intactas.
+- **Versiones**: `Main.APP_VERSION` → `"4.4.0"`, `pom.xml` → `4.4.0`, README/CHANGELOG al día.
+- **Cache-bust a v4.4.0**: `index.html` carga `app.css`/`app.js` con `?v=4.4.0` y `WebLauncher` abre el navegador con `&v=4.4.0`.
+
+### Verificado
+
+- Reconstruido con `package.bat` (perfil de la instalación —`web.properties` y `web-settings.properties`— preservado): `ExcelMerger.exe` arranca la web 4.4.0, `/api/info` responde `"version":"4.4.0"` y los assets se sirven byte-idénticos a los fuentes.
+
+## [4.3.0] — Torre de mando: rediseño corporativo con modo oscuro
+
+Versión menor sobre v4.2.0. **El motor no cambia en nada**: mismos ficheros, rutas, contenidos, textos, exit codes 0-4 y endpoints. Solo cambia la capa visual de la interfaz web —y la versión de cache-bust, que pasa a `v4.3.0` para que el navegador deje de servir la UI antigua aunque la tuviera en caché.
+
+### Cambiado
+
+- **Diseño nuevo de `index.html` + `app.css`** (concepto: *torre de mando financiera*): dashboard corporativo de alta gama con **tema claro y oscuro** (toggle en la barra superior, persistido en `localStorage`), fondo *aurora* animado (tres orbes de azul marino / azul eléctrico / cian que respiran sobre una rejilla técnica), paneles de cristal con borde degradado, y **diagrama de flujo animado en el hero** que narra el producto: tres fuentes (Extracción, Cierre, Deuda) convergen en «Resultado» con chispas y partículas recorriendo las trazas. La consola sigue siendo la máquina: el único bloque negro en modo claro, que en modo oscuro cierra la escena.
+- **Modo oscuro**: `<html data-theme="light|dark">` resuelto por script inline *antes del primer paint* (localStorage → `?theme=` → `prefers-color-scheme`), sin flash y sin tocar `app.js`; el toggle actualiza `aria-pressed`, el `theme-color` y persiste la elección. El enrutado del servidor usa `getPath()` e ignora la query, así que `?theme=` es inofensivo.
+- **Contraste AA en ambos temas** (medido sobre valores reales): claro — tinta 17.3:1, secundario 8.2:1, tenue 5.3:1, azul 6.2:1; oscuro — tinta 16.8:1, secundario 9.4:1, tenue 6.8:1, azul 7.7:1. Variantes `prefers-reduced-motion` (congela orbes, chispas y reflejos), `prefers-reduced-transparency` (desactiva el vidrio) y `prefers-contrast: more` (refuerza líneas y tinta).
+- **Versiones**: `Main.APP_VERSION` → `"4.3.0"`, `pom.xml` → `4.3.0`, README/CHANGELOG al día.
+- **Cache-bust a v4.3.0**: `index.html` carga `app.css`/`app.js` con `?v=4.3.0` y `WebLauncher` abre el navegador con `&v=4.3.0`.
+
+### Verificado
+
+- Reconstruido con `package.bat` (perfil de la instalación —`web.properties` y `web-settings.properties`— preservado): `ExcelMerger.exe` arranca la web 4.3.0, `/api/info` responde `"version":"4.3.0"` y los assets se sirven byte-idénticos a los fuentes.
+
+## [4.2.0] — Interfaz web rehecha por completo (tema claro «expediente de oficina»)
+
+Versión menor sobre v4.1.0. **El motor no cambia en nada**: mismos ficheros, rutas, contenidos, textos, exit codes 0-4 y endpoints. Solo cambia la capa visual de la interfaz web —y la versión de cache-bust, que pasa a `v4.2.0` para que el navegador deje de servir la UI antigua aunque la tuviera en caché.
+
+### Cambiado
+
+- **Diseño nuevo de `index.html` + `app.css`** (concepto: *papel y tinta, la oficina clara y la máquina en negro*): fondo de papel cálido `#f5f2ea`, tinta profunda, un único acento verde esmeralda `#0d7a4f`, tarjetas de acción rediseñadas (la fusión es la única ficha de color), rutas y ajustes sobre fichas de expediente, y la consola como único bloque oscuro. Contraste AA sobre los valores reales (tinta 13.5:1, secundario 6.5:1, tenue 4.8:1, verde sobre papel 4.8:1, blanco sobre verde 5.4:1). La funcionalidad y los hooks de `app.js` no cambian.
+- **Versiones**: `Main.APP_VERSION` → `"4.2.0"`, `pom.xml` → `4.2.0`, README/CHANGELOG al día.
+- **Cache-bust a v4.2.0**: `index.html` carga `app.css`/`app.js` con `?v=4.2.0` y `WebLauncher` abre el navegador con `&v=4.2.0` (el enrutado usa `getPath()` e ignora la query): una URL distinta a la de v4.1.0 fuerza una carga fresca en cualquier navegador.
+
+### Verificado
+
+- Reconstruido con `package.bat` (perfil de la instalación —`web.properties` y `web-settings.properties`— preservado): `ExcelMerger.exe` arranca la web 4.2.0, `/api/info` responde `"version":"4.2.0"` y los assets se sirven byte-idénticos a los fuentes.
+
+## [4.1.0] — Ajustes de salida en runtime desde la interfaz web + remodelado visual
+
+Versión menor sobre v4.0.0. Añade a la interfaz web los tres ajustes que determinan qué hojas genera la fusión —modo de salida, hoja *Resumen* y su tabla por responsable—, configurables y persistibles desde la propia página, y remoza por completo el aspecto visual de la UI. **El motor no cambia**: mismos ficheros, rutas y contenidos de salida; mismos textos literales; mismas claves de `config.properties`; mismos exit codes 0-4.
+
+Telón de fondo: en v4.0.0 la imagen portátil dejó de incluir el `config.properties` externo y las fusiones de la interfaz web pasaron a depender del embebido (`cierre` + sin matriz por responsable), reduciendo el resultado de 38 a 6 hojas. Con v4.1.0 eso se resuelve **sin tocar configuraciones a mano**: la interfaz aplica por defecto el comportamiento completo de v3.1.0 y el usuario elige el modo en cada momento.
+
+### Añadido
+
+- **Ajustes de salida en runtime** (paquete `com.excelmerger.web`, sin dependencias nuevas):
+  - `SettingsStore` persiste las tres claves de salida en `web-settings.properties` (generado junto al `web.properties`, ignorado por git): `output.mode`, `summary.enabled` y `summary.byResponsible.enabled`. Fichero opcional y resiliente: ausente o corrupto → valores por defecto; el arranque nunca falla, y se re-lee en cada fusión (el usuario puede editarlo a mano).
+  - **Default que restaura v3.1.0**: sin fichero, `output.mode=completo` + `summary.enabled=true` + `summary.byResponsible.enabled=true` → la fusión web vuelve a generar las **38 hojas** de siempre.
+  - `ConfigLoader(String, Properties)` / `ConfigLoader(Properties)` y `App.run(String, Properties)`: los ajustes se aplican como **overrides** sobre la configuración base (externa o embebida) en cada ejecución, sin tocar `config.properties`. Con overrides nulos o vacíos el comportamiento es idéntico al de v4.0.0.
+  - API: `GET /api/settings` (valores en vigor) y `POST /api/settings` (JSON mínimo con `mode`/`summaryEnabled`/`byResponsibleEnabled`; 400 si falta alguna clave, el modo no es válido o el JSON está malformado). Sin librería JSON: parseo manual como el resto del paquete. El `mergeRunner` de producción aplica los overrides del store en cada `POST /api/merge`.
+  - La regla del validador del motor se resuelve en origen: la matriz por responsable exige la hoja *Resumen* (`byResponsible → summary.enabled=true`), tanto al guardar como en la UI.
+- **Panel «Cómo quieres el resultado»** en la página: selector de modo (Resumen clásico / Por responsable / Completo), dos interruptores y una **vista previa en vivo** de las hojas que tendrá el libro (con la nota de que la Deuda solo se incluye si se aporta el tercer fichero). Cada cambio se guarda al vuelo (*«Guardado · se aplica a la próxima fusión»*); si el servidor no expone ajustes, el panel se omite silenciosamente.
+- **Remodelado visual completo** (`index.html`, `app.css`; `app.js` conserva toda su lógica y solo añade el bloque de ajustes):
+  - Sistema de tokens (color, tipografía, radios, sombras) y **Liquid Glass solo en la capa funcional** (barra superior, `<dialog>`, pantalla de fin): topbar translúcida con blur + saturación; el contenido (tarjetas, consola) queda opaco para respetar la jerarquía de capas del vidrio.
+  - La **fusión es el único punto de color**: CTA con relleno `#0B73E8→#0063CF` (texto blanco medido ≥ 4.5:1), hover por resplandor + elevación —sin aclarar el relleno, que rompería el AA—, raya de progreso sutil mientras corre y spinner estilizado.
+  - Selector de modo estilizado tipo pop-over, **switches** accesibles (`role="switch"`, anillo `:focus-visible`, track/thumb) y vista previa en chips. Consola con cabecera de puntos y estados `ok`/`warn`/`err`.
+  - **Contraste AA conservado y medido**: texto `#f4f6fa` ≈ 17:1, secundario ≈ 8:1, tenue ≈ 5.4:1, botón principal blanco ≥ 4.5:1, estados rojo/ámbar/verde ≥ 5:1 sobre las superficies usadas.
+  - Fallbacks intactos: `[hidden]{display:none!important}`, `prefers-reduced-motion`, `prefers-reduced-transparency` (los vidrios pasan a superficies opacas) y `prefers-contrast: more`.
+
+### Cambiado
+
+- **Versiones**: `Main.APP_VERSION` → `"4.1.0"`, `pom.xml` → `4.1.0`, README/CHANGELOG al día (`run.bat` y `package.bat` localizan el fat-jar por wildcard y no dependen de la versión).
+- `WebServer.start(...)` recibe el `SettingsStore`; el `mergeRunner` de producción loguea y aplica los overrides por ejecución. Los constructores de prueba sin store siguen funcionando: los endpoints de ajustes responden 404, nunca inventan valores.
+- `WebLauncher` imprime en terminal los ajustes en vigor al arrancar: `Salida: modo '…', hoja Resumen si/no, tabla por responsable si/no (cambiable desde la interfaz)`.
+
+### Corregido
+
+- **El navegador podía seguir mostrando la UI antigua tras actualizar** (caché de CSS/JS con las mismas URLs en varias versiones; peor con pestañas restauradas). `index.html` añade ahora `?v=4.1.0` a `app.css`/`app.js` y `WebLauncher` abre el navegador con `&v=4.1.0` en la query (el enrutado estático usa `getPath()`, que ignora la query): la próxima carga siempre trae el diseño nuevo, sin depender de la política de caché del navegador.
+- **`package.bat` borraba el perfil de la instalación**: al reconstruir hacía `rmdir target\dist` y perdía `web.properties` (token → la URL «estable» cambiaba) y `web-settings.properties` (los ajustes elegidos en la página). Ahora hace copia de seguridad de ambos antes de borrar y los restaura (y empaqueta) en la imagen nueva.
+
+### Sin cambios
+
+- Motor de fusión y de comprobación, textos literales de log, `config.properties` (sin claves nuevas), `web.properties`, `output.dryRun`, backup/`history/`, hoja `_Avisos`, detección de ficheros bloqueados, exit codes 0-4 y todos los flujos fuera de la interfaz web (`--cli`, `--merge`, `--compare`, `--help`).
+
+### Tests
+
+- **549 tests, 0 fallos** en 37 clases (36 previas + `SettingsStoreTest`; **+24 tests**: 11 de `SettingsStore`, 6 de endpoints en `WebServerTest`, 5 de overrides en `ConfigLoaderTest`, 2 de overrides en `AppTest`). `mvn verify` en verde: JaCoCo ≥70% INSTRUCTION, SpotBugs 0, PMD 0, checkstyle 0 y Spotless limpio.
+- **Nuevos**: `SettingsStoreTest` (defaults que restauran v3.1.0, carga resiliente ante fichero corrupto/modó inválido, persistencia y recarga, validación de modos, acoplamiento Resumen↔por-responsable, JSON); endpoints `/api/settings` en `WebServerTest` (404 sin store, GET de valores en vigor, POST que actualiza y persiste, 400 con modo inválido / JSON malformado / campo ausente); overrides en `ConfigLoaderTest` (ganan sobre fichero externo y classpath; nulos o vacíos no cambian nada) y en `AppTest` (flujo completo de `App.run` con overrides → exit 0 y output escrito).
+
+### Verificación en vivo
+
+Despliegue real en el Escritorio (`ExcelMerger.exe` v4.1.0, sin `config.properties` externo, puerto/token estables de la deployada): A/B sobre los mismos 3 fixtures de test (cierre + extraccion + deuda, 3 responsables) vía `POST /api/merge` con el token de la sesión.
+
+| Comprobación | Resultado |
+| --- | --- |
+| Default al arrancar | `GET /api/settings` → `{"mode":"completo","summaryEnabled":true,"byResponsibleEnabled":true}`; la terminal imprime `Salida: modo 'completo', hoja Resumen si, tabla por responsable si (cambiable desde la interfaz)` |
+| A/B de la salida (misma entrada, 3 fixtures) | Default (`completo`) → **10 hojas**: Cierre, Extraccion, Deuda, Equipos, Resultado, Resumen, matriz por responsable (MG002) y 1 hoja por responsable (3). Mismo motor vía `--merge` con `output.mode=completo`+resumen → 11 (la hoja `-` extra sale del `mes.orphans.enabled=true` del config externo; en la web, base = config embebido con orphans=false, igual que v4.0.0). `POST` a `cierre`+resumen off → **5 hojas** (Cierre, Extraccion, Deuda, Equipos, Resultado = comportamiento web v4.0.0). Con los inputs reales del usuario el default regenera el libro de 38 hojas de v3.1.0 |
+| `POST /api/settings` | actualiza al vuelo (`Ajustes de salida actualizados desde la interfaz: {...}` en el log), persiste en `web-settings.properties` (junto al `web.properties`) y `GET` lo devuelve; el acoplamiento Resumen↔por-responsable se aplica en origen |
+| Persistencia tras reinicio | parada vía `POST /api/shutdown`, rearranque → `GET /api/settings` sigue devolviendo los valores guardados; el usuario pudo editar el panel desde el navegador (secuencia completa de cambios en el log) |
+| Reconstrucción vía `package.bat` | `ExcelMerger.exe` arranca la web 4.1.0 y sirve `/api/info` (`{"version":"4.1.0",...}`) y `/api/settings`; `index.html`, `app.css` y `app.js` servidos **byte-idénticos** a los fuentes |
+| Redespliegue al Escritorio | misma carpeta, mismo `web.properties` conservado, sin `web-settings.properties` enviado (se crea en runtime, ignorado por git) |
+| Servidor sin ajustes (endpoints) | 404 en `GET|POST /api/settings`, cubierto por `WebServerTest` (no existe en producción: el launcher siempre crea el store) |
+
+---
+
+## [4.0.0] — Interfaz web local, modos de arranque y empaquetado portátil
+
+Versión mayor. Cambia **solo la capa de ejecución** —dónde y cómo se lanza el programa—, no el motor. Contrato congelado respetado al pie de la letra: mismos ficheros, rutas y contenidos de salida; mismos textos de mensaje literales; mismas claves de `config.properties`; mismos exit codes 0-4. La interfaz web reproduce 1:1 las opciones del menú de terminal de v3.x, que sigue intacta detrás de `--cli`.
+
+### BREAKING (solo la superficie de arranque)
+
+- **Sin argumentos ya no aparece el menú interactivo**: `run.bat` / `java -jar ...` arranca la **interfaz web local** y abre el navegador. El menú de terminal de v3.x se conserva idéntico con `--cli`.
+- **Los argumentos dejan de ignorarse silenciosamente** (comportamiento v3.0.0–v3.2.0). Ahora se interpretan: `--cli`, `--merge`, `--compare`, `--help`/`-h`. Un argumento desconocido imprime el uso por **stderr** y sale con **exit 2** (antes: se ignoraba y arrancaba el menú).
+- **`run.bat` deja de avisar y de ignorar argumentos**: es un wrapper fino que los reenvía al JAR, propaga el exit code y solo hace `pause` cuando se lanza sin argumentos (doble clic); con argumentos no se pausa, para poder usarlo en scripts.
+
+### Añadido
+
+- **Interfaz web local** (paquete `com.excelmerger.web`), **sin dependencias nuevas**:
+  - Servidor HTTP del propio JDK (`com.sun.net.httpserver`) escuchando **solo en loopback**, con **dirección estable** —puerto fijo y token persistidos, ver el bloque «Arranque de un solo clic»— (`X-Em-Token` o `?token=`); valida la cabecera `Host` contra la dirección enlazada y rechaza un `Origin` ajeno.
+  - Rutas: `GET /`, `/web/app.css`, `/web/app.js`; `GET /api/info`, `GET /api/logs?after=N`; `POST /api/merge|compare|shutdown` (con token). Respuesta de cada operación: `{"exitCode":N,"ms":N}`.
+  - Los botones ejecutan **exactamente** los flujos del menú: `POST /api/merge` → `App.run(...)` (Opción 1), `POST /api/compare` → `CompareRunner.run()` (Opción 2), `POST /api/shutdown` → exit 0 (Opción 3). El log y `System.out` del proceso se reflejan en vivo en la página (captura en un único canal; los niveles reales se interpretan en el cliente a partir del prefijo `%-5level`), sin tocar la terminal ni el fichero de log, que no cambian.
+  - **UI dark estilo Apple**, responsive (móvil desde 360 px) y accesible (contraste AA —el *Salir* destructivo es rojo tintado, no blanco sobre rojo—, `<dialog>` de confirmación con *Cancelar* autofocado, `role="log"` con `aria-live="off"` para no saturar a los lectores de pantalla, log pegado al fondo al scrollear). El token vive en `sessionStorage` y se elimina de la barra de direcciones.
+  - Guard de un solo vuelo: con una operación en curso la API responde **409** y la UI lo muestra.
+- **Arranque de un solo clic** (decisión de UX posterior a las 5 de v4.0.0: «un icono → carpetas»):
+  - **Dirección siempre igual**: puerto fijo `127.0.0.1:7420` (si está ocupado prueba `7421..7430` y, por último, uno libre) y **token persistido** en `web.properties` —fichero generado junto a `config.properties`, ignorado por git—: la URL no cambia entre arranques y se puede marcar o compartir.
+  - **Un solo proceso**: al arrancar, si la sesión guardada responde a `GET /api/info` con su token, **no se levanta otra copia**: solo se abre el navegador y el proceso termina con 0.
+  - **Carpetas auto-creadas y visibles**: el arranque crea `input.directory` y la carpeta madre de `output.file` si faltan; `/api/info` añade `inputDir`/`outputDir` (aditivo, se omiten si no se conocen) y la página muestra las rutas absolutas donde dejar los Excel y dónde sale el resultado.
+  - **Acceso directo en el escritorio**: la primera ejecución de la imagen empaquetada crea (o repone) `ExcelMerger.lnk` —best effort, solo Windows con el `.exe` junto al directorio de trabajo; en desarrollo se omite—: tras el primer doble clic, el icono queda en el escritorio.
+- **`--merge` y `--compare` headless** — cumplen la vieja promesa de un modo no-interactivo para cron/CI (pendiente desde v3.0.0): ejecutan el mismo flujo que las Opciones 1/2 y **devuelven 0-4 a nivel de proceso**.
+- **`--help` / `-h`**: uso por stdout, exit 0. (La flag se eliminó en v3.0.0; vuelve como ayuda de modos, sin `--version` ni `<configPath>`.)
+- **`package.bat`**: empaquetado portátil con `jpackage`. Genera `target\dist\ExcelMerger\` (app-image con runtime embebido y launcher de consola —`--win-console`— para que `--cli`, la URL y los exit codes sigan visibles) y lo comprime en `target\excel-merger-win64-portable.zip` (raíz `ExcelMerger\`). **Nunca instalador** (decisión 4). El directorio de entrada de jpackage es un stage limpio con solo el fat-jar, para que la imagen no se copíe a sí misma dentro de `target\`. Guardas incorporadas: cierra instancias (`ExcelMerger.exe` y un `.jar` lanzado con doble clic —`javaw`— o desde la terminal —`java -jar`, añadido tras constatar que un `java -jar` olvidado bloqueaba `mvn clean` igual que el doble clic—), **quita el atributo de solo lectura** que jpackage pone a la imagen —sin él `mvn clean` falla a mitad y deja `target\` sin runtime ni zip— y hace `pause` en cada ruta de error para que el mensaje no desaparezca.
+- **Las carpetas de trabajo viajan dentro del zip**: el paso 3 de `package.bat` crea `input\` y `output\` en la imagen **antes de comprimirlas**, cada una con su `LEEME.txt` de instrucciones, así el usuario las tiene visibles en cuanto descomprime, sin haber arrancado nada (antes solo se creaban al primer arranque). El `LEEME.txt` además garantiza que `Compress-Archive` no descarte carpetas vacías (bug conocido) y la detección de entrada lo ignora —`InputFileDetector` solo cuenta `.xlsx`/`.xls`—, así que ningún conteo ni perfil cambia.
+
+### Cambiado
+
+- **`Main` decide el modo** (`parseMode`): sin argumentos → `WebLauncher`; `--cli` → `InteractiveMenu` (mismo `try/catch` de JLine y mismo `EXIT_RUNTIME` que siempre); `--merge` → `App.run(null)`; `--compare` → `new CompareRunner().run()`; `--help` → uso + 0; desconocido → uso por stderr + 2.
+- **Exit-code split** (decisión 1): la UI muestra el código 0-4 **por ejecución**; el proceso web solo devuelve 0 (salida ordenada) o 1 (fallo de arranque); los modos headless y `--cli` preservan 0-4 en proceso.
+- **Versiones**: `Main.APP_VERSION` → `"4.0.0"`, `pom.xml` → `4.0.0`, `.gitignore` → fat-jar `excel-merger-4.0.0-jar-with-dependencies.jar` (el `run.bat` lo localiza por wildcard y no depende de la versión). Banner y README actualizados.
+- Javadoc de `WebServer`/`WebLauncher` al día: dejan de describirse como spike y remiten a `Main`/`package.bat`.
+- **Rework visual «liquid glass»** (solo visual, sin tocar funcionalidad): `app.css` se reescribe con cristal translucido —paneles con `backdrop-filter` (blur + saturación), cantos iluminados (`inset 0 1px 0`) y reflejo especular en `::before`—, auroras de fondo más ricas, barra superior y pie con filete, chips de icono y píldoras con degradado, botón «lo más reciente» con degradado azul AA y `<dialog>`/pantalla de fin en cristal esmerilado. Se añaden además dos íconos decorativos (`aria-hidden`) en el panel de carpetas. **Invariantes intactos**: mismos selectores, clases, IDs y ARIA, mismo HTML estructural y JavaScript sin cambios; contraste AA conservado (el degradado del botón flotante se oscureció para ello) y `prefers-reduced-motion` sigue anulando transiciones. Estados de accesibilidad del propio cristal: con `prefers-reduced-transparency` los paneles pasan a superficies opacas sin blur y con `prefers-contrast: more` (temas de contraste del sistema) suben la firmeza de textos, bordes y rellenos.
+
+### Sin cambios
+
+- Motor de fusión y de comprobación, textos literales de log, `config.properties` (sin claves nuevas: la sesión de la web vive en el fichero aparte `web.properties`), `output.dryRun`, backup/`history/`, hoja `_Avisos`, detección de ficheros bloqueados y todos los exit codes 0-4 de las Opciones 1/2/3.
+
+### Tests
+
+- **525 tests, 0 fallos** en 36 clases (31 previas + 5 del paquete `web`; +41 tests: 34 web y 7 de modos). `mvn verify` en verde: JaCoCo ≥70% INSTRUCTION, SpotBugs 0, PMD 0, checkstyle 0 y Spotless limpio.
+- **Nuevos**: `WebServerTest` (rutas, token, `Host`/`Origin`, busy 409, formatos JSON, carpetas en `/api/info`, salto de puerto ocupado), `WebSessionTest` (sesión persistente y degradación con fichero corrupto), `LogBufferTest`, `LineMirrorTest`, `JsonTest` y 7 tests de modos en `MainTest` (`parseMode`/`printUsage`).
+
+### Verificación en vivo
+
+| Comprobación | Resultado |
+| --- | --- |
+| `--help` | exit 0, uso por stdout (stderr vacío) |
+| `--badarg` | exit 2, stdout vacío, `Argumento desconocido: ...` + uso por stderr |
+| `--merge` / `--compare` | exit 0, `PROCESO FINALIZADO OK` / `294 discrepancias`, outputs regenerados con los textos literales |
+| `--cli` con stdin piping | menú literal, opción 3 → `Saliendo sin hacer nada. Hasta pronto.`, exit 0 |
+| Interfaz web sin argumentos | URL + token, `/api/info` con build, token inválido rechazado (`token no valido`), `/api/shutdown` → `EXIT=0` |
+| `run.bat --help` / `--badarg` / `--merge` | 0 / 2 / 0, sin pausas |
+| `package.bat` + `ExcelMerger.exe` | app-image ~140 MB, zip ~63 MB; exe `--help` 0, `--badarg` 2, `--merge` 0, web sirve `/api/info` |
+| Primer arranque del zip en el Escritorio | `web.properties` con `port=7420` + token, carpetas `input\`/`output\` auto-creadas, acceso directo `ExcelMerger.lnk` en el escritorio, `/api/info` con `inputDir`/`outputDir` absolutos |
+| Segundo doble clic y reinicio | ya en ejecución → `Excel Merger ya esta en ejecucion` + abre el navegador con **0** procesos nuevos; tras matar y relanzar, **misma URL** byte a byte |
+| `mvn clean` tras empaquetar | antes fallaba a mitad por el atributo de solo lectura de jpackage; ahora limpio (`package.bat` lo quita y mata instancias abiertas) |
+| Zip extraído **sin arrancar nada** | `ExcelMerger\input\` y `ExcelMerger\output\` presentes ya en la extracción, con su `LEEME.txt` dentro (paso 3 de `package.bat`) |
+
+### Decisiones tomadas y descartadas
+
+- **Aceptadas** (las 5 decididas para v4.0.0): split de exit codes; `run.bat` como wrapper fino; menú JLine detrás de `--cli`; solo app-image/zip, nunca instalador; UI dark estilo Apple. Posteriormente se decidió también la UX de arranque: **«un icono → carpetas»** — dirección estable, carpetas auto-creadas mostradas en la página y acceso directo en el escritorio; **sin subidas de ficheros** (se siguen usando carpetas).
+- **Dependencias nuevas**: **ninguna** — servidor `com.sun.net.httpserver` del propio JDK, assets vanilla (`index.html`/`app.css`/`app.js`) y `Json` a mano; el único cambio en `pom.xml` es la versión.
+- **SSE/WebSocket para el log**: descartado; el polling `GET /api/logs?after=N` es suficiente y más simple.
+- **Reabrir `<configPath>` posicional**: descartado; sigue mandando `config.properties` del directorio de trabajo (cambiar de entorno = copiar/renombrar, como en v3.x).
+- **`--version`**: descartado; la versión está en el banner de `--cli` y en `GET /api/info`.
+
+---
+
 ## [3.2.0] — Corrección del error de diseño que descartaba datos en la fusión
 
 Versión menor. Corrige un **error de diseño** por el que la fusión **descartaba datos presentes en los ficheros de entrada** en tres puntos distintos de la hoja `Resultado`. **Sin BREAKING**: no se añaden ni se eliminan claves de `config.properties`, el menú, los códigos de salida y la estructura del libro no cambian, y el cambio es **exclusivamente aditivo** — ninguna fila con datos del output anterior desaparece ni cambia de valor; lo único que se recupera son datos que antes se perdían (más las filas **totalmente vacías**, que ahora también se eliminan en configs sin las 5 columnas numéricas; ver *Migración*).

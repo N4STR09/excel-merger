@@ -38,6 +38,44 @@ public class ConfigLoader {
         loadProperties(configPath);
     }
 
+    /**
+     * v4.1.0: carga la configuracion base (externa o classpath, igual que
+     * {@link #ConfigLoader()}) y aplica encima los overrides indicados.
+     *
+     * <p>Es el mecanismo de los ajustes configurables en runtime de la
+     * interfaz web: la pagina persiste tres claves de salida
+     * ({@code output.mode}, {@code summary.enabled} y
+     * {@code summary.byResponsible.enabled}) y esta carga las aplica sobre
+     * el config que sea, sin tocar el fichero. Linea de comandos y menu
+     * de terminal siguen cargando sin overrides (comportamiento identico
+     * al de v3.x).</p>
+     *
+     * @param overrides claves a sobreescribir tras cargar la base; si es
+     *        {@code null} o vacio, el resultado es identico a la carga sin
+     *        overrides.
+     */
+    public ConfigLoader(Properties overrides) {
+        this(DEFAULT_CONFIG_FILE, overrides);
+    }
+
+    /**
+     * v4.1.0: como {@link #ConfigLoader(Properties)} pero con ruta de
+     * configuracion explicita ({@code null} = default).
+     *
+     * @param configPath ruta al fichero de configuracion, o {@code null}
+     *        para usar el default ({@code config.properties}).
+     * @param overrides  claves a sobreescribir tras cargar la base.
+     */
+    public ConfigLoader(String configPath, Properties overrides) {
+        this.properties = new Properties();
+        loadProperties(configPath == null ? DEFAULT_CONFIG_FILE : configPath);
+        if (overrides != null && !overrides.isEmpty()) {
+            properties.putAll(overrides);
+            log.debug("Aplicadas {} claves de override sobre la configuracion base.",
+                    overrides.size());
+        }
+    }
+
     private void loadProperties(String configPath) {
         Path externalPath = Paths.get(configPath);
 

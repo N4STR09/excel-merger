@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Properties;
 
 /**
  * Logica de la aplicacion Excel Merger, extraida de {@link Main} en v3.0.0
@@ -65,6 +66,21 @@ public final class App {
      * @return exit code (0 = OK; 1-4 segun excepcion).
      */
     public static int run(String configPath) {
+        return run(configPath, null);
+    }
+
+    /**
+     * v4.1.0: como {@link #run(String)} pero aplicando los overrides de la
+     * interfaz web sobre la configuracion base. Con {@code overrides} nulo
+     * o vacio el comportamiento es identico a {@link #run(String)}.
+     *
+     * @param configPath ruta al fichero de configuracion ({@code null} =
+     *                   default).
+     * @param overrides  claves de configuracion a sobreescribir en runtime
+     *                   (ver {@link ConfigLoader#ConfigLoader(Properties)}).
+     * @return exit code (0 = OK; 1-4 segun excepcion).
+     */
+    public static int run(String configPath, Properties overrides) {
         Instant start = Instant.now();
         log.info(BANNER_SEPARATOR);
         log.info("   {} v{}", APP_NAME, Main.APP_VERSION);
@@ -73,9 +89,7 @@ public final class App {
         RunReport report = new RunReport();
 
         try {
-            ConfigLoader config = (configPath != null)
-                    ? new ConfigLoader(configPath)
-                    : new ConfigLoader();
+            ConfigLoader config = new ConfigLoader(configPath, overrides);
 
             // v3.0.0: dry-run se lee del config en vez de la CLI desaparecida.
             boolean dryRun = config.getBoolean("output.dryRun", false);
